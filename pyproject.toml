@@ -23,13 +23,25 @@ classifiers = [
 ]
 dependencies = [
     "coldfront>=1.1.7,<2",
-    "git+https://github.com/Tufts-Technology-Services/coldfront-utils.git",
+    "coldfront_utils@git+https://github.com/Tufts-Technology-Services/coldfront-utils.git",
 ]
 
 [project.urls]
 "Source Code" = "https://github.com/Tufts-Technology-Services/coldfront-storage-plugin"
 
 [dependency-groups]
+starfish = [
+    "starfish_api_client@git+https://github.com/Tufts-Technology-Services/starfish-api-client.git",
+]
+
+vast = [
+    "vast_api_client@https://github.com/Tufts-Technology-Services/vast-api-client.git",
+]
+
+truenas = [
+    "truenas_utils@https://github.com/Tufts-Technology-Services/truenas-utils.git",
+]
+
 dev = [
     "pytest-django>=4.11.1",
     "reuse>=5.0.2",
