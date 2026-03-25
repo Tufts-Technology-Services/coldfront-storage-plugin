@@ -1,16 +1,19 @@
 from datetime import datetime
 import logging
 import re
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from coldfront.coldfront.config.env import ENV
-from coldfront.coldfront.plugins.storage.tasks import QUOTA_DISPLAY_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, USAGE_REPORT_DATE_ATTRIBUTE_NAME
 from coldfront.core.allocation.models import AllocationAttribute, AllocationAttributeType
+from .constants import (QUOTA_DISPLAY_ATTRIBUTE_NAME,
+                        STORAGE_PLUGIN_STORAGE_UNITS,
+                         QUOTA_ATTRIBUTE_NAME, 
+                        USAGE_IN_BYTES_ATTRIBUTE_NAME, 
+                        USAGE_REPORT_DATE_ATTRIBUTE_NAME)
 
 logger = logging.getLogger(__name__)
 
 
-
-def bytes_to_units(value, units=ENV.str("STORAGE_PLUGIN_STORAGE_UNITS", default="TB")):
+def bytes_to_units(value, units=STORAGE_PLUGIN_STORAGE_UNITS):
     units = units.lower().strip()
     if units == "tb":
         return value / (1000 ** 4)
@@ -24,7 +27,7 @@ def bytes_to_units(value, units=ENV.str("STORAGE_PLUGIN_STORAGE_UNITS", default=
         raise ValueError(f"Unrecognized storage unit '{units}'")
 
 
-def units_to_bytes(value, units=ENV.str("STORAGE_PLUGIN_STORAGE_UNITS", default="TB")):
+def units_to_bytes(value, units=STORAGE_PLUGIN_STORAGE_UNITS):
     units = units.lower().strip()
     if units == "tb":
         return value * (1000 ** 4)
@@ -39,7 +42,7 @@ def units_to_bytes(value, units=ENV.str("STORAGE_PLUGIN_STORAGE_UNITS", default=
 
 
 def get_client_config(client_id):
-    client_config = ENV.dict("STORAGE_PLUGIN_CLIENTS").get(client_id)
+    client_config = settings.STORAGE_PLUGIN_CLIENTS.get(client_id)
     if not client_config:
         raise ValueError(f"No configuration found for storage plugin client with id '{client_id}'")
     return client_config

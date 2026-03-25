@@ -1,9 +1,11 @@
 import datetime
 
 import logging
-from coldfront.config.env import ENV
-from .utils import units_to_bytes, update_allocation_attribute_value, validate_path, get_client_config, get_user_id, get_group_id
 from coldfront.core.allocation.models import Allocation
+
+from .utils import (units_to_bytes, update_allocation_attribute_value, 
+                    validate_path, get_client_config, get_user_id, get_group_id)
+from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +14,7 @@ def set_quota(allocation_id, client_id):
     allocation = Allocation.objects.get(id=allocation_id)
     tc = get_truenas_client(client_id)
     path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='truenas_path').first()
-    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)')).first()
+    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first()
     
     if path_attr and quota_attr:
         truenas_path = path_attr.value.strip() # remove any leading or trailing whitespace
@@ -42,8 +44,8 @@ def get_quotas_batch(resources, client_config):
                 r = [q for q in all_quotas if q['mountpoint'] == storage_path]
                 current_quota = r[0]['quota']
                 report_date = datetime.datetime.now() # TrueNAS API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
-                update_allocation_attribute_value(allocation, ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)'), str(round(units_to_bytes(current_quota), 2))) 
-                update_allocation_attribute_value(allocation, ENV.str('QUOTA_REPORT_DATE_ATTRIBUTE_NAME', 'quota_report_date'), report_date.isoformat())
+                update_allocation_attribute_value(allocation, QUOTA_ATTRIBUTE_NAME, str(round(units_to_bytes(current_quota), 2))) 
+                update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
 
             except Exception as e:
                 logger.error(f"Error getting quota info from TrueNAS for allocation {allocation} with path {storage_path}: {e}")
@@ -54,7 +56,7 @@ def get_quotas_batch(resources, client_config):
 def create_share(allocation_id, client_config):
     allocation = Allocation.objects.get(id=allocation_id)
     path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='truenas_path').first()
-    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)')).first()
+    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first()
     
     if not (path_attr and quota_attr):
         logger.warning(f"Allocation {allocation} is missing a TrueNAS Path attribute or quota attribute. Cannot create share without these attributes.")

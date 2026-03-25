@@ -2,10 +2,12 @@ from datetime import datetime
 import logging
 
 from coldfront.plugins.account_signup.utils import ttl_cache
-from coldfront.plugins.storage.utils import update_allocation_usage
-from coldfront.config.env import ENV
 from coldfront.core.allocation.models import AllocationAttribute
 
+from .utils import update_allocation_usage
+from .constants import (STARFISH_HOST, 
+                        STARFISH_TOKEN, 
+                        STORAGE_PLUGIN_STARFISH_VOL_PATH_ATTRIBUTE_NAME)
 logger = logging.getLogger(__name__)
 
 
@@ -21,8 +23,7 @@ def get_storage_usage_batch():
     and update the usage for each allocation accordingly.
     """
     sf_allocations = AllocationAttribute.objects.filter(
-        allocation_attribute_type__name=ENV.str("STORAGE_PLUGIN_STARFISH_VOL_PATH_ATTRIBUTE_NAME", 
-                                                default="sf_vol_path"))
+        allocation_attribute_type__name=STORAGE_PLUGIN_STARFISH_VOL_PATH_ATTRIBUTE_NAME)
     volumes = set(i.split(':')[0] for i in sf_allocations.values_list("value", flat=True).distinct())
     for vol in volumes:
         vol_attributes = sf_allocations.filter(value__startswith=f"{vol}:")
@@ -44,8 +45,7 @@ def get_starfish_usage_data_by_volume(volume: str) -> list:
     """
     from starfish_api_client import StarfishAPIClient # pylint: ignore=import-outside-toplevel
     
-    host = ENV.str("SF_HOST")
-    sf = StarfishAPIClient(host=host, token=ENV.str("SF_TOKEN"))
+    sf = StarfishAPIClient(host=STARFISH_HOST, token=STARFISH_TOKEN)
     subfolder_response = sf.request_subfolder_query(volume)
     # we only need certain fields from the response, so we will extract those and store them in a list of dictionaries
     retained_fields = ['vol_path', 'logical_size', 'sync']

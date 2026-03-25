@@ -1,11 +1,11 @@
 import logging
 from django.dispatch import receiver
-from coldfront.config.env import ENV
 from django_q.tasks import async_task
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_change_approved)
 from coldfront.core.allocation.views import (AllocationCreateView, AllocationChangeView, AllocationChangeDetailView, AllocationAttributeEditView)
 
+from .constants import QUOTA_ATTRIBUTE_NAME
 from .models import StorageHandler
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def activate_storage_allocation(sender, **kwargs):
         handler = StorageHandler.objects.filter(resource=storage_resource.first()) # make sure there is a storage handler configured for this resource before attempting to provision storage
         if handler.exists():   
             # what could be here? 
-            async_task('coldfront.plugins.storage.tasks.provision_or_update_storage', allocation_pk)
+            async_task('storage.tasks.provision_or_update_storage', allocation_pk)
 
 
 @receiver(allocation_attribute_changed, sender=AllocationChangeDetailView)
@@ -36,7 +36,7 @@ def allocation_attribute_changed_handler(sender, **kwargs):
     allocation_pk = kwargs.get('allocation_pk')
     attribute_pk = kwargs.get('attribute_pk')
     attribute_name = AllocationAttribute.objects.get(id=attribute_pk).allocation_attribute_type.name
-    if attribute_name == ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)'):
+    if attribute_name == QUOTA_ATTRIBUTE_NAME:
         # quota change
         storage_resource = Allocation.objects.get(id=allocation_pk).resources.filter(resource_type__name='Storage')
         if storage_resource.exists():

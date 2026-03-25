@@ -1,11 +1,11 @@
 
 import datetime
 import logging
-from coldfront.config.env import ENV
 from coldfront.core.allocation.models import Allocation
 from coldfront.plugins.account_signup.utils import ttl_cache
 
-from .utils import units_to_bytes, bytes_to_units, update_allocation_attribute_value, validate_path, get_client_config
+from .constants import QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_ATTRIBUTE_NAME
+from .utils import (units_to_bytes, bytes_to_units, update_allocation_attribute_value, get_client_config, validate_posix_path)
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,8 @@ def get_quota_batch(resources, client_id):
                 q = get_quota(vast_path, client_id)
                 current_quota = q['soft_limit']
                 report_date = datetime.datetime.now() # VAST API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
-                update_allocation_attribute_value(allocation, ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)'), round(float(bytes_to_units(current_quota)), 2))
-                update_allocation_attribute_value(allocation, ENV.str('QUOTA_REPORT_DATE_ATTRIBUTE_NAME', 'quota_report_date'), report_date.isoformat())
+                update_allocation_attribute_value(allocation, QUOTA_ATTRIBUTE_NAME, round(float(bytes_to_units(current_quota)), 2))
+                update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
 
             except Exception as e:
                 logger.error(f"Error getting quota info from VAST for allocation {allocation} with path {vast_path}: {e}")
@@ -51,11 +51,11 @@ def set_quota(allocation_id, client_id):
     allocation = Allocation.objects.get(id=allocation_id)
     vc = get_vast_client(client_id)
     vast_path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='vast_path').first()
-    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)')).first()
+    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first()
     
     if vast_path_attr and quota_attr:
         vast_path = vast_path_attr.value.strip() # remove any leading or trailing whitespace
-        validate_path(vast_path) # validate the path before using it to set the quota
+        validate_posix_path(vast_path) # validate the path before using it to set the quota
         quota_bytes = units_to_bytes(float(quota_attr.value))
         vc.update_quota_size(vast_path, quota_bytes)
     else:
@@ -67,11 +67,11 @@ def create_share(allocation_id, client_id):
     vc = get_vast_client(client_id)
     params = get_vast_params(client_id)
     vast_path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='vast_path').first()
-    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=ENV.str('QUOTA_ATTRIBUTE_NAME', 'Storage Quota (TB)')).first()
+    quota_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first()
     
     if vast_path_attr and quota_attr:
         vast_path = vast_path_attr.value.strip() # remove any leading or trailing whitespace
-        validate_path(vast_path) # validate the path before using it to set the quota
+        validate_posix_path(vast_path) # validate the path before using it to set the quota
         quota_bytes = units_to_bytes(float(quota_attr.value))
             # view policy NFSDefault id = 3, share_name is None for NFS
         # view create will create the directory

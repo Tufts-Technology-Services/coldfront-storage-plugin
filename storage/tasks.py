@@ -1,22 +1,14 @@
 import logging
 from django.conf import settings
-from coldfront.coldfront.plugins.storage.utils import units_to_bytes
 from django_q.tasks import async_task
 from coldfront.core.resource.models import ResourceAttribute
 from coldfront.core.allocation.models import Allocation
-from coldfront.config.env import ENV
 
+from .utils import units_to_bytes
 from .models import StorageHandler
+from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_ID_ATTRIBUTE_NAME
 
 logger = logging.getLogger(__name__)
-
-#USAGE_IN_BYTES_ATTRIBUTE_NAME = "reported_usage_bytes"
-#QUOTA_ATTRIBUTE_NAME = "Storage Quota (TB)"
-#USAGE_REPORT_DATE_ATTRIBUTE_NAME = "usage_report_date"
-#QUOTA_REPORT_DATE_ATTRIBUTE_NAME = "quota_report_date"
-#QUOTA_ID_ATTRIBUTE_NAME = "vast_path"
-
-
 
 
 def get_storage_quotas_batch():
@@ -59,9 +51,9 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
     if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_key:
         client_config = settings.STORAGE_PLUGIN_CONFIG.get("clients", {}).get(storage_handler.quota_client_key, None)
         if client_config:
-            new_quota = allocation.allocationattribute_set.filter(allocation_attribute_type__name=ENV.str('QUOTA_ATTRIBUTE_NAME')).first().value # todo: make sure this contains the new value. 
+            new_quota = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value # todo: make sure this contains the new value. 
             new_quota_bytes = units_to_bytes(float(new_quota))
-            quota_id = allocation.allocationattribute_set.filter(allocation_attribute_type__name=ENV.str('QUOTA_ID_ATTRIBUTE_NAME')).first().value
+            quota_id = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ID_ATTRIBUTE_NAME).first().value
             async_task(storage_handler.set_quota_task, quota_id, new_quota_bytes, client_config)
         else:
             logger.warning(f"Storage resources for Allocation ({allocation.pk}) have unrecognized quota_client_key '{storage_handler.quota_client_key}'. Add client configuration for this key in STORAGE_PLUGIN_CONFIG.")
