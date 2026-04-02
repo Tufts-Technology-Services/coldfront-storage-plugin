@@ -5,8 +5,8 @@ from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_change_approved)
 from coldfront.core.allocation.views import (AllocationCreateView, AllocationChangeView, AllocationChangeDetailView, AllocationAttributeEditView)
 
-from .constants import QUOTA_ATTRIBUTE_NAME
 from .models import StorageHandler
+from .constants import QUOTA_ATTRIBUTE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ def activate_storage_allocation(sender, **kwargs):
         handler = StorageHandler.objects.filter(resource=storage_resource.first()) # make sure there is a storage handler configured for this resource before attempting to provision storage
         if handler.exists():   
             # what could be here? 
-            async_task('storage.tasks.provision_or_update_storage', allocation_pk)
+            async_task('coldfront.plugins.storage.tasks.provision_or_update_storage', allocation_pk)
 
 
 @receiver(allocation_attribute_changed, sender=AllocationChangeDetailView)

@@ -1,12 +1,12 @@
 import logging
 from django.conf import settings
+from coldfront_utils import units_to_bytes
 from django_q.tasks import async_task
 from coldfront.core.resource.models import ResourceAttribute
 from coldfront.core.allocation.models import Allocation
 
-from .utils import units_to_bytes
 from .models import StorageHandler
-from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_ID_ATTRIBUTE_NAME
+from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_ID_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 
 logger = logging.getLogger(__name__)
 
@@ -19,16 +19,11 @@ def get_storage_quotas_batch():
     handlers = StorageHandler.objects.all()
 
     for storage_type in handlers:
-        update_task = storage_type.get_quota_task if storage_type else None
-        if update_task is None:
+        get_quotas_task = storage_type.get_quotas_batch_task if storage_type else None
+        if get_quotas_task is None:
             logger.warning(f"No quota task configured for storage system type '{storage_type.resource.name}'")
             continue   
-        client_config = settings.STORAGE_PLUGIN_CONFIG.get("clients", {}).get(storage_type.quota_client_key, None)
-        if client_config:
-            resources = storage_type.resource_set.all()
-            async_task(update_task, resources, client_config) # this task must be able to handle receiving a list of resources and the client config, and then update the quotas for all allocations of those resources accordingly
-        else:
-            logger.warning(f"Storage resources have unrecognized quota_client_key '{storage_type.quota_client_key}'. Add client configuration for this key in STORAGE_PLUGIN_CONFIG.")
+        async_task(get_quotas_task, storage_type.resource, storage_type.quota_client_id) # this task must be able to handle receiving a list of resources and the client config, and then update the quotas for all allocations of those resources accordingly
 
 
 def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_attribute_change_id=None):
@@ -42,23 +37,23 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
         logger.warning(f"Allocation {allocation.pk} is associated with {resources.count()} storage resources. Expected exactly 1. Cannot determine which resource to use to update storage quota.")
         return
     
-    #  and that resource has a StorageHandler configured with a set_quota_task and quota_client_key. 
+    #  and that resource has a StorageHandler configured with a set_quota_task and quota_client_id. 
     storage_handler = StorageHandler.objects.filter(resource=resources.first())
     if not storage_handler.exists():
         logger.warning(f"No StorageHandler configured for resource(s) associated with allocation {allocation.pk}. Cannot update storage quota.")
         return
     
-    if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_key:
-        client_config = settings.STORAGE_PLUGIN_CONFIG.get("clients", {}).get(storage_handler.quota_client_key, None)
+    if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_id:
+        client_config = settings.STORAGE_PLUGIN_CLIENTS.get(storage_handler.quota_client_id, None)
         if client_config:
             new_quota = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value # todo: make sure this contains the new value. 
-            new_quota_bytes = units_to_bytes(float(new_quota))
+            new_quota_bytes = units_to_bytes(float(new_quota), units=STORAGE_PLUGIN_STORAGE_UNITS)
             quota_id = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ID_ATTRIBUTE_NAME).first().value
             async_task(storage_handler.set_quota_task, quota_id, new_quota_bytes, client_config)
         else:
-            logger.warning(f"Storage resources for Allocation ({allocation.pk}) have unrecognized quota_client_key '{storage_handler.quota_client_key}'. Add client configuration for this key in STORAGE_PLUGIN_CONFIG.")
+            logger.warning(f"Storage resources for Allocation ({allocation.pk}) have unrecognized quota_client_id '{storage_handler.quota_client_id}'. Add client configuration for this id in STORAGE_PLUGIN_CLIENTS.")
     else:
-        logger.warning(f"Resource for Allocation ({allocation.pk}) does not have a valid StorageHandler with set_quota_task and quota_client_key configured")
+        logger.warning(f"Resource for Allocation ({allocation.pk}) does not have a valid StorageHandler with set_quota_task and quota_client_id configured")
 
 
 def update_storage_quota(allocation, new_quota):
@@ -71,9 +66,3 @@ def update_storage_quota(allocation, new_quota):
         async_task(update_task, allocation, client_config)
     else:
         logger.warning(f"Storage resources have unrecognized storage system '{storage_system}'")
-
-
-
-
-
-

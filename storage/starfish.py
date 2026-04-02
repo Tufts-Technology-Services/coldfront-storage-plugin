@@ -1,13 +1,11 @@
 from datetime import datetime
 import logging
 
-from coldfront.plugins.account_signup.utils import ttl_cache
 from coldfront.core.allocation.models import AllocationAttribute
-
+from coldfront_utils import ttl_cache
 from .utils import update_allocation_usage
-from .constants import (STARFISH_HOST, 
-                        STARFISH_TOKEN, 
-                        STORAGE_PLUGIN_STARFISH_VOL_PATH_ATTRIBUTE_NAME)
+from .constants import STORAGE_PLUGIN_STARFISH_VOL_PATH_ATTRIBUTE_NAME, STARFISH_HOST, STARFISH_TOKEN
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,10 +27,12 @@ def get_storage_usage_batch():
         vol_attributes = sf_allocations.filter(value__startswith=f"{vol}:")
         volume_data = get_starfish_usage_data_by_volume(vol)
         for vol_path in vol_attributes:
-            usage, report_date = get_path_usage_data(volume_data, vol_path)
+            usage, report_date = get_path_usage_data(volume_data, vol_path.value)
             if usage and report_date:
+                print(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
                 update_allocation_usage(vol_path.allocation, usage, report_date)
             else:
+                print(f"No matching subfolder found for allocation attribute with vol_path value {vol_path.value}")
                 logger.warning(f"No matching subfolder found for allocation attribute with vol_path value {vol_path.value}")
     return True
 
@@ -58,7 +58,7 @@ def get_path_usage_data(volume_data, vol_path) -> tuple:
     Helper function to extract usage data for a specific volume path from the results 
     of a Starfish API query for all subfolders of a volume.
     """
-    match = [i for i in volume_data if i['vol_path'] == vol_path]
+    match = [i for i in volume_data if i['vol_path'].lower() == vol_path.lower()]
     if match:
         usage = match[0]['logical_size']
         report_date = datetime.fromtimestamp(match[0]['sync'])

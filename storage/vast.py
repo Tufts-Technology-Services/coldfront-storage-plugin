@@ -1,28 +1,28 @@
-
 import datetime
 import logging
 from coldfront.core.allocation.models import Allocation
-from coldfront.plugins.account_signup.utils import ttl_cache
-
-from .constants import QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_ATTRIBUTE_NAME
-from .utils import (units_to_bytes, bytes_to_units, update_allocation_attribute_value, get_client_config, validate_posix_path)
+from coldfront_utils import ttl_cache, units_to_bytes, bytes_to_units, update_allocation_attribute_value, validate_posix_path
+from .utils import get_client_config
+from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 
 logger = logging.getLogger(__name__)
 
 
-def get_quota_batch(resources, client_id):
+def get_quota_batch(resource, client_id):
     # allocations of this resource
-    allocations = Allocation.objects.filter(resources__in=resources).distinct()
+    logger.info(f"Getting quotas for resource {resource.name} with client_id {client_id}")
+    allocations = resource.allocation_set.distinct()
     # get allocation info from vast api and update allocation attributes in coldfront
     for allocation in allocations:
         vast_path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='vast_path').first()
         if vast_path_attr:
             vast_path = vast_path_attr.value
+            logger.info(f"Getting quota for allocation {allocation.pk} with path {vast_path}")
             try:
                 q = get_quota(vast_path, client_id)
                 current_quota = q['soft_limit']
                 report_date = datetime.datetime.now() # VAST API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
-                update_allocation_attribute_value(allocation, QUOTA_ATTRIBUTE_NAME, round(float(bytes_to_units(current_quota)), 2))
+                update_allocation_attribute_value(allocation, QUOTA_ATTRIBUTE_NAME, round(bytes_to_units(current_quota, STORAGE_PLUGIN_STORAGE_UNITS), 2))
                 update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
 
             except Exception as e:
@@ -31,8 +31,9 @@ def get_quota_batch(resources, client_id):
             logger.warning(f"Allocation {allocation} does not have a vast_path attribute")
 
 
-def get_quota(vast_path, client_id):
+def get_quota(vast_path: str, client_id: str) -> dict:
     all_quotas = get_all_quotas(client_id)  # This function is decorated with @ttl_cache, so it will return cached data if available
+    logger.info(f"Looking for quota with path {vast_path} in VAST quotas data")
     res = [q for q in all_quotas if q['path'] == vast_path]
     if len(res) > 0:         
         return res[0]
@@ -41,13 +42,14 @@ def get_quota(vast_path, client_id):
 
 
 @ttl_cache(timeout=60*60)
-def get_all_quotas(client_id):
+def get_all_quotas(client_id: str) -> list:
     vc = get_vast_client(client_id)
     all_quotas = vc.get_quotas()
-    return all_quotas
+    retained_fields = ['path', 'soft_limit', 'hard_limit', 'pretty_state']
+    return [{field: i[field] for field in retained_fields} for i in all_quotas]
 
 
-def set_quota(allocation_id, client_id):
+def set_quota(allocation_id: int, client_id: str) -> None:
     allocation = Allocation.objects.get(id=allocation_id)
     vc = get_vast_client(client_id)
     vast_path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='vast_path').first()
@@ -56,13 +58,13 @@ def set_quota(allocation_id, client_id):
     if vast_path_attr and quota_attr:
         vast_path = vast_path_attr.value.strip() # remove any leading or trailing whitespace
         validate_posix_path(vast_path) # validate the path before using it to set the quota
-        quota_bytes = units_to_bytes(float(quota_attr.value))
+        quota_bytes = units_to_bytes(float(quota_attr.value), STORAGE_PLUGIN_STORAGE_UNITS)
         vc.update_quota_size(vast_path, quota_bytes)
     else:
         logger.warning(f"Allocation {allocation} is missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
 
 
-def create_share(allocation_id, client_id):
+def create_share(allocation_id: int, client_id: str) -> None:
     allocation = Allocation.objects.get(id=allocation_id)
     vc = get_vast_client(client_id)
     params = get_vast_params(client_id)
@@ -72,7 +74,7 @@ def create_share(allocation_id, client_id):
     if vast_path_attr and quota_attr:
         vast_path = vast_path_attr.value.strip() # remove any leading or trailing whitespace
         validate_posix_path(vast_path) # validate the path before using it to set the quota
-        quota_bytes = units_to_bytes(float(quota_attr.value))
+        quota_bytes = units_to_bytes(float(quota_attr.value), STORAGE_PLUGIN_STORAGE_UNITS)
             # view policy NFSDefault id = 3, share_name is None for NFS
         # view create will create the directory
         view = vc.get_views(path=vast_path)
@@ -107,7 +109,6 @@ def create_share(allocation_id, client_id):
 
 
 def get_vast_client(client_id):
-    # pylint: disable=import-outside-toplevel
     from vast_api_client import VASTClient
     client_config = get_client_config(client_id)
     return VASTClient(host=client_config.get("host"), 
@@ -118,7 +119,6 @@ def get_vast_client(client_id):
 def get_vast_params(client_id):
     """Helper function to extract and validate parameters from the client config for a given client_id.
     """
-    # pylint: disable=import-outside-toplevel
     from vast_api_client import ProtocolEnum
     client_config = get_client_config(client_id)
     margin_percent = int(client_config.get("quota_margin_percent", 0))

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "coldfront-storage-plugin"
 version = "0.0.1"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     { name = "Chris Barnett" }
 ]
@@ -16,20 +16,20 @@ license-files = ["LICENSE"]
 keywords = ["high-performance-computing", "resource-allocation"]
 classifiers = [
     'Programming Language :: Python :: 3',
-    'Framework :: Django :: 4.2',
+    'Framework :: Django :: 6.0',
     'Topic :: Scientific/Engineering',
     'Topic :: System :: Systems Administration',
     'Topic :: Internet :: WWW/HTTP :: WSGI :: Application',
 ]
 dependencies = [
-    "coldfront>=1.1.7,<2",
+    "coldfront",
     "coldfront_utils@git+https://github.com/Tufts-Technology-Services/coldfront-utils.git",
 ]
 
 [project.urls]
 "Source Code" = "https://github.com/Tufts-Technology-Services/coldfront-storage-plugin"
 
-[dependency-groups]
+[project.optional-dependencies]
 starfish = [
     "starfish_api_client@git+https://github.com/Tufts-Technology-Services/starfish-api-client.git",
 ]
@@ -42,6 +42,7 @@ truenas = [
     "truenas_utils@https://github.com/Tufts-Technology-Services/truenas-utils.git",
 ]
 
+[dependency-groups]
 dev = [
     "pytest-django>=4.11.1",
     "reuse>=5.0.2",
@@ -50,6 +51,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["storage"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [[tool.uv.index]]
 name = "testpypi"
@@ -60,7 +64,7 @@ explicit = true
 [tool.ruff]
 line-length = 120
 indent-width = 4
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "S308"]
