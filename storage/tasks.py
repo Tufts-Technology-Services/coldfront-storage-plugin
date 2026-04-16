@@ -1,12 +1,14 @@
 import logging
-from django.conf import settings
 from coldfront_utils import units_to_bytes
 from django_q.tasks import async_task
-from coldfront.core.resource.models import ResourceAttribute
 from coldfront.core.allocation.models import Allocation
 
+from storage.utils import get_client_config
+
 from .models import StorageHandler
-from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_ID_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
+from .constants import (QUOTA_ATTRIBUTE_NAME, 
+                        STORAGE_PLUGIN_STORAGE_UNITS, 
+                        GROUP_ATTRIBUTE_NAME, STORAGE_LOG_ONLY)
 
 logger = logging.getLogger(__name__)
 
@@ -16,53 +18,91 @@ def get_storage_quotas_batch():
     Task to get storage quotas from storage systems for all storage resources in Coldfront with StorageHandlers
     attribute names: quota_report_date, vast_path, Storage Path, Storage Quota (TB)
     """
+    if STORAGE_LOG_ONLY:
+        logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual retrieval of storage quotas and just logging info.")
+    
     handlers = StorageHandler.objects.all()
 
     for storage_type in handlers:
         get_quotas_task = storage_type.get_quotas_batch_task if storage_type else None
         if get_quotas_task is None:
             logger.warning(f"No quota task configured for storage system type '{storage_type.resource.name}'")
-            continue   
-        async_task(get_quotas_task, storage_type.resource, storage_type.quota_client_id) # this task must be able to handle receiving a list of resources and the client config, and then update the quotas for all allocations of those resources accordingly
-
+            continue
+        logger.info(f"Getting quotas for resource {storage_type.resource.name}")
+        
+        if STORAGE_LOG_ONLY:
+            logger.info(f"--STORAGE_LOG_ONLY")
+            logger.info(f"Would call task '{get_quotas_task}' for resource {storage_type.resource.name} with client id: {storage_type.quota_client_id}")
+            continue
+        async_task(get_quotas_task, storage_type.resource.id,
+                   get_client_config(storage_type.quota_client_id))
+        
 
 def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_attribute_change_id=None):
     """
     Task to update storage quota for an allocation. This is intended to be called when an allocation is created or updated for a resource, in order to ensure that the storage quota for the allocation is updated in the storage system accordingly.
     """
-    allocation = Allocation.objects.get(pk=allocation_pk)
-    # make sure this allocation is associated with only one storage resource
+    if STORAGE_LOG_ONLY:
+        logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual update of storage quota and just logging info.")
+    storage_handler, allocation = get_storage_handler(allocation_pk)
+    if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_id:
+        client_config = get_client_config(storage_handler.quota_client_id)
+        new_quota = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value # todo: make sure this contains the new value. 
+        new_quota_bytes = units_to_bytes(float(new_quota), units=STORAGE_PLUGIN_STORAGE_UNITS)
+        native_path = allocation.allocationattribute_set.filter(allocation_attribute_type__name=client_config['native_path_attribute_name']).first().value
+        if native_path and new_quota_bytes:
+            if STORAGE_LOG_ONLY:
+                logger.info(f"--STORAGE_LOG_ONLY")
+                logger.info(f"Would call task '{storage_handler.set_quota_task}' for allocation {allocation_pk} with native path: {native_path} and new quota (bytes): {new_quota_bytes}")
+                return
+            async_task(storage_handler.set_quota_task, native_path, new_quota_bytes, client_config)
+        else:
+            logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
+            raise ValueError(f"Missing required information to create share for allocation {allocation_pk}.")
+    else:
+        logger.warning(f"No quota update task or client configured for resource {storage_handler.resource.name} associated with allocation {allocation_pk}. Cannot update storage quota.")
+
+
+
+def create_share(allocation_pk: int):
+    if STORAGE_LOG_ONLY:
+        logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual creation of storage share and just logging info.")
+    storage_handler, allocation = get_storage_handler(allocation_pk)
+    if storage_handler and storage_handler.create_share_task and storage_handler.create_client_id:
+        client_config = get_client_config(storage_handler.create_client_id)
+        native_path = allocation.allocationattribute_set.filter(allocation_attribute_type__name=client_config['native_path_attribute_name']).first().value
+        quota_bytes = units_to_bytes(float(allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value), units=STORAGE_PLUGIN_STORAGE_UNITS)
+        owner = allocation.project.pi.username
+        group = None
+        aa = allocation.allocation_attribute_set.filter(allocation_attribute_type__name=GROUP_ATTRIBUTE_NAME) # make sure the group attribute type exists
+        if aa.exists():
+            group = aa.first().value
+        else:            
+            pa = allocation.project.projectattribute_set.filter(project_attribute_type__name=GROUP_ATTRIBUTE_NAME)
+            if pa.exists():
+                group = pa.first().value
+        if group and owner and native_path and quota_bytes:
+            if STORAGE_LOG_ONLY:
+                logger.info(f"--STORAGE_LOG_ONLY")
+                logger.info(f"Would call task '{storage_handler.create_share_task}' for allocation {allocation_pk} with native path: {native_path}, quota (bytes): {quota_bytes}, owner: {owner}, and group: {group}")
+                return
+            async_task(storage_handler.create_share_task, native_path, quota_bytes, owner, group, client_config)
+        else:
+            logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
+            raise ValueError(f"Missing required information to create share for allocation {allocation_pk}.")
+    else:
+        logger.warning(f"No share creation task or client configured for resource {storage_handler.resource.name} associated with allocation {allocation_pk}. Cannot create share.")
+
+
+def get_storage_handler(allocation_id):
+    allocation = Allocation.objects.get(id=allocation_id)
     resources =  allocation.resources.filter(resource_type__name="Storage")
     if resources.count() != 1:
-        logger.warning(f"Allocation {allocation.pk} is associated with {resources.count()} storage resources. Expected exactly 1. Cannot determine which resource to use to update storage quota.")
-        return
+        logger.warning(f"Allocation {allocation.pk} is associated with {resources.count()} storage resources. Expected exactly 1. Cannot determine which resource to use to get storage handler.")
+        return None
     
-    #  and that resource has a StorageHandler configured with a set_quota_task and quota_client_id. 
-    storage_handler = StorageHandler.objects.filter(resource=resources.first())
-    if not storage_handler.exists():
-        logger.warning(f"No StorageHandler configured for resource(s) associated with allocation {allocation.pk}. Cannot update storage quota.")
-        return
-    
-    if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_id:
-        client_config = settings.STORAGE_PLUGIN_CLIENTS.get(storage_handler.quota_client_id, None)
-        if client_config:
-            new_quota = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value # todo: make sure this contains the new value. 
-            new_quota_bytes = units_to_bytes(float(new_quota), units=STORAGE_PLUGIN_STORAGE_UNITS)
-            quota_id = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ID_ATTRIBUTE_NAME).first().value
-            async_task(storage_handler.set_quota_task, quota_id, new_quota_bytes, client_config)
-        else:
-            logger.warning(f"Storage resources for Allocation ({allocation.pk}) have unrecognized quota_client_id '{storage_handler.quota_client_id}'. Add client configuration for this id in STORAGE_PLUGIN_CLIENTS.")
-    else:
-        logger.warning(f"Resource for Allocation ({allocation.pk}) does not have a valid StorageHandler with set_quota_task and quota_client_id configured")
-
-
-def update_storage_quota(allocation, new_quota):
-    storage_system = ResourceAttribute.objects.filter(
-        resource__in=allocation.resources.all(),
-        resource_attribute_type__name='storage_system').first().value
-    update_task = settings.STORAGE_PLUGIN_CONFIG.get(storage_system, {}).get("update_quota", None)
-    client_config = settings.STORAGE_PLUGIN_CONFIG.get(storage_system, {}).get("client_config", None)
-    if update_task and client_config:
-        async_task(update_task, allocation, client_config)
-    else:
-        logger.warning(f"Storage resources have unrecognized storage system '{storage_system}'")
+    storage_handler = StorageHandler.objects.filter(resource=resources.first()).first()
+    if not storage_handler:
+        logger.warning(f"No StorageHandler configured for resource(s) associated with allocation {allocation.pk}. Cannot get storage handler.")
+        return None
+    return storage_handler, allocation
