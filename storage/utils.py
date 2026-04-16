@@ -8,10 +8,10 @@ from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, u
 logger = logging.getLogger(__name__)
 
 
-def get_client_config(client_id):
-    client_match = [i for i in settings.STORAGE_PLUGIN_CLIENTS if i['client_id'] == client_id]
+def get_client_config(client_key):
+    client_match = [i for i in settings.STORAGE_PLUGIN_CLIENTS if i['client_key'] == client_key]
     if not client_match:
-        raise ValueError(f"No configuration found for storage plugin client with id '{client_id}'")
+        raise ValueError(f"No configuration found for storage plugin client with key '{client_key}'")
     return client_match[0]
 
 
