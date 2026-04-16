@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+from pathlib import Path
 from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path
 from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
@@ -60,7 +61,13 @@ def set_quota(native_path: str, quota_bytes: int, client_config: dict) -> None:
     if native_path and quota_bytes:
         vast_path = native_path.strip() # remove any leading or trailing whitespace
         validate_posix_path(vast_path) # validate the path before using it to set the quota
-        vc.update_quota_size(vast_path, quota_bytes)
+        quota_match = vc.get_quotas(path=Path(vast_path))
+        if len(quota_match) == 0:
+            logger.error(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
+            raise ValueError(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
+        logger.info(f"Updating quota for path {vast_path} to {quota_bytes} bytes")
+        logger.info(f"Quota match details: {quota_match[0]}")
+        vc.update_quota_size(quota_match[0]['id'], quota_bytes)
     else:
         logger.warning(f"Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
 
