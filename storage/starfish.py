@@ -38,7 +38,7 @@ def get_storage_usage_batch(resource_id=None, client_config=None):
                 logger.warning(f"Allocation {alloc.pk} of resource {resource.name} has native path attribute value '{native_path_value}' that is invalid: {e}. This allocation will be skipped in Starfish usage retrieval task.")
 
     # now filter to only include allocations with valid native path attributes
-    sf_attrs = AllocationAttribute.objects.filter(allocation__resource=resource,
+    sf_attrs = AllocationAttribute.objects.filter(allocation__in=resource_allocations,
         allocation_attribute_type__name=path_attr)
     # get a set of all unique volumes
     volumes = set(i.split(':')[0] for i in sf_attrs.values_list("value", flat=True).distinct())
