@@ -13,6 +13,31 @@ from .constants import (QUOTA_ATTRIBUTE_NAME,
 logger = logging.getLogger(__name__)
 
 
+def get_storage_usage_batch():
+    """
+    Task to get storage usage from storage systems for all storage resources in Coldfront with StorageHandlers
+    attribute names: usage_in_bytes, usage_report_date, vast_path, Storage Path
+    """
+    if STORAGE_LOG_ONLY:
+        logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual retrieval of storage usage and just logging info.")
+    
+    handlers = StorageHandler.objects.all()
+
+    for storage_type in handlers:
+        get_usage_task = storage_type.get_usage_batch_task if storage_type else None
+        if get_usage_task is None:
+            logger.warning(f"No usage retrieval task configured for storage system type '{storage_type.resource.name}'")
+            continue
+        logger.info(f"Getting usage for resource {storage_type.resource.name}")
+        
+        if STORAGE_LOG_ONLY:
+            logger.info(f"--STORAGE_LOG_ONLY")
+            logger.info(f"Would call task '{get_usage_task}' for resource {storage_type.resource.name} with client id: {storage_type.usage_client_id}")
+            continue
+        async_task(get_usage_task, storage_type.resource.id,
+                   get_client_config(storage_type.usage_client_id))
+        
+
 def get_storage_quotas_batch():
     """
     Task to get storage quotas from storage systems for all storage resources in Coldfront with StorageHandlers

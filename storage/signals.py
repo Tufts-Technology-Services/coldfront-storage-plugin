@@ -1,11 +1,9 @@
 import logging
 from django.dispatch import receiver
-from django_q.tasks import async_task
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_change_approved)
 from coldfront.core.allocation.views import (AllocationCreateView, AllocationChangeView, AllocationChangeDetailView, AllocationAttributeEditView)
 
-from .models import StorageHandler
 from .constants import QUOTA_ATTRIBUTE_NAME
 from .tasks import set_storage_quota, create_share
 

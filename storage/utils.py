@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_client_config(client_id):
-    client_config = settings.STORAGE_PLUGIN_CLIENTS.get(client_id)
-    if not client_config:
+    client_match = [i for i in settings.STORAGE_PLUGIN_CLIENTS if i['client_id'] == client_id]
+    if not client_match:
         raise ValueError(f"No configuration found for storage plugin client with id '{client_id}'")
-    return client_config
+    return client_match[0]
 
 
 def update_allocation_usage(allocation, new_usage_bytes, report_date=None):

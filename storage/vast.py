@@ -32,7 +32,7 @@ def get_quota_batch(resource_id, client_config):
             except Exception as e:
                 logger.error(f"Error getting quota info for allocation {allocation} with path {vast_path}: {e}")
         else:
-            logger.warning(f"Allocation {allocation} does not have a vast_path attribute")
+            logger.warning(f"Allocation {allocation} does not have a vast_path attribute and will be skipped in quota retrieval task")
 
 
 def get_quota(native_path: str, client_config: dict) -> dict:
