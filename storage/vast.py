@@ -9,7 +9,7 @@ from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, S
 logger = logging.getLogger(__name__)
 
 
-def get_quota_batch(resource_id, client_config):
+def get_quotas_batch(resource_id, client_config):
     # get allocation info from vast api and update allocation attributes in coldfront
     resource = Resource.objects.get(id=resource_id)
     allocations = resource.allocation_set.distinct()
