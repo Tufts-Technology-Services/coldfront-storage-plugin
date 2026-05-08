@@ -63,12 +63,16 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
         gid = get_group_id(group)
         tc.create_project_share(truenas_path, quota_bytes, uid, gid, create_dataset=(not share_details['dataset_exists']),
                                 create_globus_share=(not share_details['globus_share_exists']),
-                                create_starfish_share=(not share_details['starfish_share_exists']))
+                                create_starfish_share=(not share_details['starfish_share_exists']),
+                                create_gateway_share=(not share_details['gateway_share_exists']))
         logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
 
 
 def get_truenas_client(client_config):
     from truenas_utils import TrueNASClient 
-    return TrueNASClient(client_config['api_key'], client_config['host'], client_config['parent_dataset'],
-                        verify_ssl=client_config['verify_certs'], starfish_hosts=client_config['starfish_hosts'],
-                        globus_hosts=client_config['globus_hosts'])
+    cl = TrueNASClient(client_config['api_key'], client_config['host'], client_config['parent_dataset'],
+                        verify_ssl=client_config['verify_certs'])
+    cl.starfish_hosts = client_config.get('starfish_hosts', [])
+    cl.globus_hosts = client_config.get('globus_hosts', [])
+    cl.gateway_hosts = client_config.get('gateway_hosts', [])
+    return cl
