@@ -2,7 +2,7 @@ import logging
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AllocationPermission, AllocationStatusChoice
 from coldfront.core.allocation.views import AllocationCreateView as ColdfrontAllocationCreateView
 from coldfront.core.allocation.views import AllocationAttributeEditView as ColdfrontAllocationAttributeEditView
-from coldfront.plugins.allocation_blueprint.tasks import apply_blueprint
+from allocation_blueprint.tasks import apply_blueprint
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.shortcuts import get_object_or_404, redirect
