@@ -2,10 +2,15 @@ import datetime
 import logging
 
 from coldfront.core.resource.models import Resource
-from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
+from coldfront_utils import (bytes_to_units, 
+                             update_allocation_attribute_value, 
+                             validate_posix_path,
+                             get_gid, get_uid)
 
 from .utils import update_allocation_attribute_value
-from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
+from .constants import (QUOTA_ATTRIBUTE_NAME, 
+                        QUOTA_REPORT_DATE_ATTRIBUTE_NAME, 
+                        STORAGE_PLUGIN_STORAGE_UNITS)
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +64,8 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
     else:
         logger.info("creating/updating share on tier2...")
         # get uid, gid, and quota for this allocation
-        uid = get_user_id(owner)
-        gid = get_group_id(group)
+        uid = get_uid(owner)
+        gid = get_gid(group)
         tc.create_project_share(truenas_path, quota_bytes, uid, gid, create_dataset=(not share_details['dataset_exists']),
                                 create_globus_share=(not share_details['globus_share_exists']),
                                 create_starfish_share=(not share_details['starfish_share_exists']),
