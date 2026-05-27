@@ -99,7 +99,7 @@ def create_share(allocation_pk: int):
         quota_bytes = units_to_bytes(float(allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value), units=STORAGE_PLUGIN_STORAGE_UNITS)
         owner = allocation.project.pi.username
         group = None
-        aa = allocation.allocation_attribute_set.filter(allocation_attribute_type__name=GROUP_ATTRIBUTE_NAME) # make sure the group attribute type exists
+        aa = allocation.allocationattribute_set.filter(allocation_attribute_type__name=GROUP_ATTRIBUTE_NAME) # make sure the group attribute type exists
         if aa.exists():
             group = aa.first().value
         else:            
