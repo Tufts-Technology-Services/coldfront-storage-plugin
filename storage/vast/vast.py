@@ -1,6 +1,5 @@
 import datetime
 import logging
-import os
 from pathlib import Path
 from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path
@@ -79,12 +78,13 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
     if native_path and quota_bytes:
         vast_path = native_path.strip() # remove any leading or trailing whitespace
         validate_posix_path(vast_path) # validate the path before using it to set the quota
+        vast_path = Path(vast_path) # convert to Path object for easier manipulation and to ensure consistent formatting
         # view create will create the directory
         view = vc.get_views(path=vast_path)
         if len(view) > 0:
             logger.warning(f"{vast_path} View already exists")
         else:
-            share_name = None if not params.get("include_share") else f"{os.path.basename(vast_path)}$"
+            share_name = None if not params.get("include_share") else f"{vast_path.name}$"
             vc.add_view(path=vast_path, protocols=params.get("protocols"),
                         policy_id=params.get("view_policy_id"), share_name=share_name)
         quota_obj = vc.get_quotas(path=vast_path)
@@ -103,7 +103,7 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
         if len(protected_path) > 0:
             logger.warning(f"{vast_path} Protected path already exists")
         else:
-            vc.add_protected_path(name=params.get("snapshot_name_template").format(os.path.basename(vast_path)),
+            vc.add_protected_path(name=params.get("snapshot_name_template").format(vast_path.name),
                                   source_dir=vast_path,
                                   tenant_id=params.get("tenant_id"),
                                   protection_policy_id=params.get("protection_policy_id"))
