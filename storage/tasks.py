@@ -103,7 +103,7 @@ def create_share(allocation_pk: int):
         if aa.exists():
             group = aa.first().value
         else:            
-            pa = allocation.project.projectattribute_set.filter(project_attribute_type__name=GROUP_ATTRIBUTE_NAME)
+            pa = allocation.project.projectattribute_set.filter(proj_attr_type__name=GROUP_ATTRIBUTE_NAME)
             if pa.exists():
                 group = pa.first().value
         if group and owner and native_path and quota_bytes:
