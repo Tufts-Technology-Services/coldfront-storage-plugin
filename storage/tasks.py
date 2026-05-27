@@ -2,9 +2,7 @@ import logging
 from coldfront_utils import units_to_bytes
 from django_q.tasks import async_task
 from coldfront.core.allocation.models import Allocation
-
 from storage.utils import get_client_config
-
 from .models import StorageHandler
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS, 
@@ -35,7 +33,7 @@ def get_storage_usage_batch():
             logger.info(f"Would call task '{get_usage_task}' for resource {storage_type.resource.name} with client id: {storage_type.usage_client_id}")
             continue
         async_task(get_usage_task, storage_type.resource.id,
-                   get_client_config(storage_type.usage_client_id))
+                   storage_type.usage_client_id)
         
 
 def get_storage_quotas_batch():
@@ -60,7 +58,7 @@ def get_storage_quotas_batch():
             logger.info(f"Would call task '{get_quotas_task}' for resource {storage_type.resource.name} with client id: {storage_type.quota_client_id}")
             continue
         async_task(get_quotas_task, storage_type.resource.id,
-                   get_client_config(storage_type.quota_client_id))
+                   storage_type.quota_client_id)
         
 
 def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_attribute_change_id=None):
@@ -80,7 +78,7 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
                 logger.info(f"--STORAGE_LOG_ONLY")
                 logger.info(f"Would call task '{storage_handler.set_quota_task}' for allocation {allocation_pk} with native path: {native_path} and new quota (bytes): {new_quota_bytes}")
                 return
-            async_task(storage_handler.set_quota_task, native_path, new_quota_bytes, client_config)
+            async_task(storage_handler.set_quota_task, native_path, new_quota_bytes, storage_handler.quota_client_id, allocation_pk)
         else:
             logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
             raise ValueError(f"Missing required information to create share for allocation {allocation_pk}.")
@@ -111,7 +109,7 @@ def create_share(allocation_pk: int):
                 logger.info(f"--STORAGE_LOG_ONLY")
                 logger.info(f"Would call task '{storage_handler.create_share_task}' for allocation {allocation_pk} with native path: {native_path}, quota (bytes): {quota_bytes}, owner: {owner}, and group: {group}")
                 return
-            async_task(storage_handler.create_share_task, native_path, quota_bytes, owner, group, client_config)
+            async_task(storage_handler.create_share_task, native_path, quota_bytes, owner, group, storage_handler.quota_client_id, allocation_pk)
         else:
             logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
             raise ValueError(f"Missing required information to create share for allocation {allocation_pk}.")

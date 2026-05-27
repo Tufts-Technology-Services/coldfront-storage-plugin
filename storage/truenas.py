@@ -7,7 +7,7 @@ from coldfront_utils import (bytes_to_units,
                              validate_posix_path,
                              get_gid, get_uid)
 
-from .utils import update_allocation_attribute_value
+from .utils import update_allocation_attribute_value, get_client_config
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
                         QUOTA_REPORT_DATE_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS)
@@ -15,8 +15,8 @@ from .constants import (QUOTA_ATTRIBUTE_NAME,
 logger = logging.getLogger(__name__)
 
 
-def set_quota(native_path: str, quota_bytes: int, client_config: dict):
-    tc = get_truenas_client(client_config)
+def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocation_pk: int) -> None:
+    tc = get_truenas_client(client_config_id)
     truenas_path = native_path.strip() # remove any leading or trailing whitespace
     validate_posix_path(truenas_path) # validate the path before using it to set the quota
     share_details = tc.get_dataset_info(truenas_path, details=True)
@@ -26,8 +26,8 @@ def set_quota(native_path: str, quota_bytes: int, client_config: dict):
     tc.update_quota(truenas_path, quota_bytes)
 
 
-def get_quotas_batch(resource_id, client_config):
-    tc = get_truenas_client(client_config)
+def get_quotas_batch(resource_id, client_config_id):
+    tc = get_truenas_client(client_config_id)
     all_quotas = tc.get_all_datasets()
 
     resource = Resource.objects.get(id=resource_id)
@@ -50,11 +50,11 @@ def get_quotas_batch(resource_id, client_config):
             logger.warning(f"Allocation {allocation} does not have a Storage Path attribute")
 
 
-def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config: dict):
+def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
     truenas_path = native_path.strip() # remove any leading or trailing whitespace
     validate_posix_path(truenas_path) # validate the path before using it to set the quota
     
-    tc = get_truenas_client(client_config)
+    tc = get_truenas_client(client_config_id)
     # check if share exists
     logger.debug("checking share details...")
     share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
@@ -73,7 +73,8 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
         logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
 
 
-def get_truenas_client(client_config):
+def get_truenas_client(client_config_id):
+    client_config = get_client_config(client_config_id)
     from truenas_utils import TrueNASClient 
     cl = TrueNASClient(client_config['api_key'], client_config['host'], client_config['parent_dataset'],
                         verify_ssl=client_config['verify_certs'])

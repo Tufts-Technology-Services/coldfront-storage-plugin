@@ -3,14 +3,18 @@ import logging
 from pathlib import Path
 from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path
-from ..constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
+from storage.utils import get_client_config
+from storage.constants import (QUOTA_ATTRIBUTE_NAME, 
+                               QUOTA_REPORT_DATE_ATTRIBUTE_NAME, 
+                               STORAGE_PLUGIN_STORAGE_UNITS)
 
 logger = logging.getLogger(__name__)
 
 
-def get_quotas_batch(resource_id, client_config):
+def get_quotas_batch(resource_id, client_config_id):
     # get allocation info from vast api and update allocation attributes in coldfront
     resource = Resource.objects.get(id=resource_id)
+    client_config = get_client_config(client_config_id)
     allocations = resource.allocation_set.distinct()
     for allocation in allocations:
         native_path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name=client_config['native_path_attribute_name']).first()
@@ -19,7 +23,7 @@ def get_quotas_batch(resource_id, client_config):
             validate_posix_path(vast_path)
             logger.info(f"Getting quota for allocation {allocation.pk} with path {vast_path}")
             try:
-                q = get_quota(vast_path, client_config)
+                q = get_quota(vast_path, client_config_id)
                 current_quota = q['soft_limit']
                 report_date = datetime.datetime.now() # VAST API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
                 update_allocation_attribute_value(allocation, 
@@ -35,8 +39,8 @@ def get_quotas_batch(resource_id, client_config):
             logger.warning(f"Allocation {allocation} does not have a vast_path attribute and will be skipped in quota retrieval task")
 
 
-def get_quota(native_path: str, client_config: dict) -> dict:
-    all_quotas = get_all_quotas(client_config)  # This function is decorated with @ttl_cache, so it will return cached data if available
+def get_quota(native_path: str, client_config_id: str) -> dict:
+    all_quotas = get_all_quotas(client_config_id)  # This function is decorated with @ttl_cache, so it will return cached data if available
     vast_path = native_path.strip() # remove any leading or trailing whitespace
     validate_posix_path(vast_path)
     logger.info(f"Looking for quota with id {vast_path} in VAST quotas data")
@@ -48,15 +52,15 @@ def get_quota(native_path: str, client_config: dict) -> dict:
 
 
 @ttl_cache(timeout=60*60)
-def get_all_quotas(client_config: dict) -> list:
-    vc = get_vast_client(client_config)
+def get_all_quotas(client_config_id: str) -> list:
+    vc = get_vast_client(client_config_id)
     all_quotas = vc.get_quotas()
     retained_fields = ['path', 'soft_limit', 'hard_limit', 'pretty_state']
     return [{field: i[field] for field in retained_fields} for i in all_quotas]
 
 
-def set_quota(native_path: str, quota_bytes: int, client_config: dict) -> None:
-    vc = get_vast_client(client_config)
+def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocation_pk: int) -> None:
+    vc = get_vast_client(client_config_id)
     if native_path and quota_bytes:
         vast_path = native_path.strip() # remove any leading or trailing whitespace
         validate_posix_path(vast_path) # validate the path before using it to set the quota
@@ -71,9 +75,9 @@ def set_quota(native_path: str, quota_bytes: int, client_config: dict) -> None:
         logger.warning(f"Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
 
 
-def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config: dict) -> None:
-    vc = get_vast_client(client_config)
-    params = get_vast_params(client_config)
+def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
+    vc = get_vast_client(client_config_id)
+    params = get_vast_params(client_config_id)
     
     if native_path and quota_bytes:
         vast_path = native_path.strip() # remove any leading or trailing whitespace
@@ -111,17 +115,19 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
         logger.warning(f"Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
 
 
-def get_vast_client(client_config: dict):
+def get_vast_client(client_config_id: str):
     from vast_api_client import VASTClient
+    client_config = get_client_config(client_config_id)
     return VASTClient(host=client_config.get("host"),
                     user=client_config.get("user"),
                     password=client_config.get("password"))
 
 
-def get_vast_params(client_config: dict):
+def get_vast_params(client_config_id: str):
     """Helper function to extract and validate parameters from the client config for a given client_id.
     """
     from vast_api_client import ProtocolEnum
+    client_config = get_client_config(client_config_id)
     margin_percent = int(client_config.get("quota_margin_percent", 0))
     if margin_percent < 0 or margin_percent >= 100:
         logger.warning(f"Invalid quota margin percent {margin_percent} in VAST client config. It should be between 0 and 100. Defaulting to 0.")

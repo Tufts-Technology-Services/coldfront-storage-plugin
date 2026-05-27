@@ -9,7 +9,7 @@ from .utils import update_allocation_usage, get_client_config
 logger = logging.getLogger(__name__)
 
 
-def get_storage_usage_batch(resource_id=None, client_config=None):
+def get_storage_usage_batch(resource_id=None, client_config_id=None):
     """
     Task to get storage usage for all storage resources in Coldfront with valid 
     Starfish volume paths associated with their allocations
@@ -21,6 +21,7 @@ def get_storage_usage_batch(resource_id=None, client_config=None):
     and update the usage for each allocation accordingly.
     """
     resource = Resource.objects.get(id=resource_id)
+    client_config = get_client_config(client_config_id)
     # to take full advantage of caching, we need to group by volume
     path_attr = client_config['native_path_attribute_name']
 
@@ -45,7 +46,7 @@ def get_storage_usage_batch(resource_id=None, client_config=None):
 
     for vol in volumes:
         vol_attributes = sf_attrs.filter(value__startswith=f"{vol}:")
-        volume_data = get_starfish_usage_data_by_volume(vol, client_config['client_key'])
+        volume_data = get_starfish_usage_data_by_volume(vol, client_config_id)
         for vol_path in vol_attributes:
             try:
                 validate_starfish_path(vol_path.value)
