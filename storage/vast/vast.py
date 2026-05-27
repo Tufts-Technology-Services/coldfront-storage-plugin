@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path
-from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
+from ..constants import QUOTA_ATTRIBUTE_NAME, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 
 logger = logging.getLogger(__name__)
 
