@@ -2,7 +2,7 @@ import logging
 from django.dispatch import receiver
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_change_approved)
-from coldfront.core.allocation.views import (AllocationCreateView, AllocationChangeView, AllocationChangeDetailView, AllocationAttributeEditView)
+from coldfront.core.allocation.views import (AllocationCreateView, AllocationDetailView, AllocationChangeDetailView, AllocationAttributeEditView)
 
 from .constants import QUOTA_ATTRIBUTE_NAME
 from .tasks import set_storage_quota, create_share
@@ -10,7 +10,7 @@ from .tasks import set_storage_quota, create_share
 logger = logging.getLogger(__name__)
 
 
-@receiver(allocation_activate, sender=AllocationCreateView)
+@receiver(allocation_activate, sender=AllocationDetailView)
 #@receiver(allocation_change_approved, sender=AllocationChangeView)
 def activate_storage_allocation(sender, **kwargs):
     allocation_pk = kwargs.get('allocation_pk')
