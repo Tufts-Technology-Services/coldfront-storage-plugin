@@ -1,8 +1,8 @@
 import logging
 from coldfront_utils import units_to_bytes
 from django_q.tasks import async_task
-from coldfront.core.allocation.models import Allocation
-from storage.utils import get_client_config
+from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType
+from storage.utils import get_attribute_value, get_client_config
 from .models import StorageHandler
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS, 
@@ -129,3 +129,23 @@ def get_storage_handler(allocation_id):
         logger.warning(f"No StorageHandler configured for resource(s) associated with allocation {allocation.pk}. Cannot get storage handler.")
         return None
     return storage_handler, allocation
+
+
+def add_attributes_to_new_storage_allocation(allocation_pk: int):
+    storage_handler, allocation = get_storage_handler(allocation_pk)
+    client_ids = set([storage_handler.usage_client_id, storage_handler.quota_client_id, storage_handler.create_client_id])
+    for client_id in client_ids:
+        client_config = get_client_config(client_id)
+        attribute_type = AllocationAttributeType.objects.get(name=client_config['native_path_attribute_name'])
+        attribute_template = client_config.get('native_path_attribute_template', None)
+        if not AllocationAttribute.objects.filter(allocation=allocation, allocation_attribute_type=attribute_type).exists():
+            if attribute_template:
+                AllocationAttribute.objects.create(
+                allocation_attribute_type=attribute_type,
+                value=get_attribute_value(allocation.id, attribute_template),
+                allocation=allocation)
+            else:
+                AllocationAttribute.objects.create(
+                    allocation_attribute_type=attribute_type,
+                    value="",
+                    allocation=allocation)

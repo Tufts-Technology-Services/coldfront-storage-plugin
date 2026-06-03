@@ -1,8 +1,9 @@
 import logging
 from django.dispatch import receiver
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
-from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_change_approved)
-from coldfront.core.allocation.views import (AllocationCreateView, AllocationDetailView, AllocationChangeDetailView, AllocationAttributeEditView)
+from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_new)
+from coldfront.core.allocation.views import (AllocationCreateView, AllocationDetailView, 
+                                             AllocationChangeDetailView, AllocationAttributeEditView)
 
 from .constants import QUOTA_ATTRIBUTE_NAME
 from .tasks import set_storage_quota, create_share
@@ -30,3 +31,14 @@ def allocation_attribute_changed_handler(sender, **kwargs):
     if attribute_name == QUOTA_ATTRIBUTE_NAME:
         # quota change
         set_storage_quota(allocation_pk, allocation_attribute_change_id=attribute_pk)
+
+
+def enable_add_attributes():
+    allocation_new.connect(add_attributes_to_new_storage_allocation_handler, sender=AllocationCreateView, dispatch_uid="add_storage_attributes_to_new_allocation")
+
+
+def add_attributes_to_new_storage_allocation_handler(sender, **kwargs):
+    allocation_pk = kwargs.get('allocation_pk')
+    allocation = Allocation.objects.get(pk=allocation_pk)
+    if allocation.resources.first().resource_type.name == 'Storage':
+        add_attributes_to_new_storage_allocation(allocation_pk)

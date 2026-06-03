@@ -67,10 +67,6 @@ class StorageAllocationRequestDetailsView(LoginRequiredMixin, UserPassesTestMixi
                 allocation_attribute_type=attr_type,
                 value=str(quota),
             )
-            if apps.is_installed('allocation_blueprint'):
-                logger.info("Applying allocation blueprint for allocation %s", self.allocation.pk)
-                from allocation_blueprint.tasks import apply_blueprint
-                apply_blueprint(self.allocation.id)
         except AllocationAttributeType.DoesNotExist:
             messages.error(
                 self.request,

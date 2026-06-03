@@ -152,3 +152,5 @@ def get_vast_params(client_config_id: str):
         "quota_margin_percent": margin_percent,
         "snapshot_name_template": str(client_config.get("snapshot_name_template"))
     }
+
+
