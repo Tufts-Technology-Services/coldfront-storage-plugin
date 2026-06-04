@@ -1,7 +1,7 @@
 import logging
 from coldfront_utils import units_to_bytes
 from django_q.tasks import async_task
-from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType
+from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType, AttributeType
 from storage.utils import get_attribute_value, get_client_config
 from .models import StorageHandler
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
@@ -136,7 +136,18 @@ def add_attributes_to_new_storage_allocation(allocation_pk: int):
     client_ids = set([storage_handler.usage_client_id, storage_handler.quota_client_id, storage_handler.create_client_id])
     for client_id in client_ids:
         client_config = get_client_config(client_id)
-        attribute_type = AllocationAttributeType.objects.get(name=client_config['native_path_attribute_name'])
+        try:
+            attribute_type = AllocationAttributeType.objects.get(name=client_config['native_path_attribute_name'])
+        except AllocationAttributeType.DoesNotExist:
+            logger.warning(f"AllocationAttributeType '{client_config['native_path_attribute_name']}' does not exist. Creating a new one.")
+            attribute_type = AllocationAttributeType.objects.create(
+                name=client_config['native_path_attribute_name'],
+                attribute_type=AttributeType.objects.get(name="Text"),
+                is_required=True,
+                is_unique=True,
+                is_changeable=False,
+                is_private=True) # create the attribute type if it does not exist
+        
         attribute_template = client_config.get('native_path_attribute_template', None)
         if not AllocationAttribute.objects.filter(allocation=allocation, allocation_attribute_type=attribute_type).exists():
             if attribute_template:
