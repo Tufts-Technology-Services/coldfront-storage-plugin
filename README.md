@@ -4,7 +4,15 @@ Coldfront plugin for managing storage
 The Storage Plugin provides an interface for managing storage within the ColdFront system. It allows for the integration of external storage systems, such as VAST, to handle storage allocation and usage.
 
 ## Currently Supported Actions
+* get_usage_batch_task: Get storage usage for a batch of allocations
+* get_quotas_batch_task: Get storage quota for a batch of allocations
+* set_quota_task: Set storage quota for an allocation
+* create_storage_task: Create storage for an allocation
 
+## Implemented Clients
+* VAST: https://vastdata.com/
+* TrueNAS: https://www.truenas.com/
+* Starfish: https://www.starfishstorage.com/ (only usage reporting)
 
 ## Installation
 1. Install the plugin using uv:
@@ -78,6 +86,7 @@ STORAGE_PLUGIN_CLIENTS = {
         "native_path_attribute_name": "truenas_path", # name of the allocation attribute that will hold the native path value for this client
     } 
 }
+```
 
 ## Additional Information
 ## Relevant Signals
