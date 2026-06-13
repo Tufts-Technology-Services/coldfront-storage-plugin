@@ -1,10 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from django.conf import settings
 import re
 from coldfront.core.project.models import ProjectAttribute
 from coldfront.core.resource.models import ResourceAttribute 
-from coldfront.core.allocation.models import Allocation
+from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
 from .constants import QUOTA_DISPLAY_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS, USAGE_REPORT_DATE_ATTRIBUTE_NAME
 from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
 
@@ -90,3 +90,29 @@ def get_attribute_value(allocation_id, template_string):
         return render_template_string(template_string, allocation_id)
     else:
         return template_string
+
+
+def stamp_allocation_requester(allocation, requester_username):
+    create_private_allocation_attribute(allocation, "allocation_requester", f"{requester_username}:{datetime.now(timezone.utc).isoformat()}")
+
+
+def stamp_allocation_approver(allocation, approver_username):
+    create_private_allocation_attribute(allocation, "allocation_approver", f"{approver_username}:{datetime.now(timezone.utc).isoformat()}")
+
+
+def stamp_quota_requester(allocation, requester_username):
+    create_private_allocation_attribute(allocation, "quota_requester", f"{requester_username}:{datetime.now(timezone.utc).isoformat()}")
+
+
+def stamp_quota_approver(allocation, approver_username):
+    create_private_allocation_attribute(allocation, "quota_approver", f"{approver_username}:{datetime.now(timezone.utc).isoformat()}")
+
+
+def create_private_allocation_attribute(allocation, attribute_name, attribute_value):
+    attr_type, _ = AllocationAttributeType.objects.get_or_create(name=attribute_name,
+                                                                attribute_type=AttributeType.objects.get(name='Text'),
+                                                                defaults={'is_private': True, 'is_unique': False})
+    allocation.allocationattribute_set.create(
+        allocation_attribute_type=attr_type,
+        value=attribute_value,
+    )
