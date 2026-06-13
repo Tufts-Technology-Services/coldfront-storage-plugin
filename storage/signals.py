@@ -10,7 +10,7 @@ from coldfront.core.allocation.views import (AllocationCreateView, AllocationDet
                                              AllocationAttributeEditView)
 
 from .constants import QUOTA_ATTRIBUTE_NAME
-from .tasks import set_storage_quota, create_share
+from .tasks import set_storage_quota, create_share, add_attributes_to_new_storage_allocation
 from .context_storage import get_request_username
 from .utils import (stamp_allocation_requester, stamp_allocation_approver, 
                     stamp_quota_requester, stamp_quota_approver)
