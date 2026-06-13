@@ -1,5 +1,5 @@
 import logging
-from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AllocationPermission, AllocationStatusChoice
+from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AllocationPermission
 from coldfront.core.allocation.views import AllocationCreateView as ColdfrontAllocationCreateView
 from coldfront.core.allocation.views import AllocationAttributeEditView as ColdfrontAllocationAttributeEditView
 from django.contrib import messages
@@ -9,8 +9,8 @@ from django.urls import reverse
 from django.apps import apps
 from django.views.generic import FormView
 
-from .constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
-from .forms import AllocationAttributeEditForm, StorageAllocationRequestDetailsForm
+from ..constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
+from ..forms import AllocationAttributeEditForm, StorageAllocationRequestDetailsForm
 
 logger = logging.getLogger(__name__)
 
