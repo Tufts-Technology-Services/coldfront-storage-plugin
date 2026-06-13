@@ -33,3 +33,25 @@ class AllocationAttributeEditForm(forms.Form):
 
         allocation_attribute.value = cleaned_data.get("value")
         allocation_attribute.clean()
+
+
+class StorageAuditSearchForm(forms.Form):
+    project = forms.CharField(label="Project Title", max_length=100, required=False)
+    username = forms.CharField(label="Username", max_length=100, required=False)
+    resource_name = forms.ModelMultipleChoiceField(
+        label="Resource Name",
+        queryset=Resource.objects.select_related("resource_type").filter(is_allocatable=True, resource_type__name__iexact="storage").order_by(Lower("name")),
+        required=False,
+    )
+    allocation_attribute_name = forms.ModelChoiceField(
+        label="Allocation Attribute Name",
+        queryset=AllocationAttributeType.objects.all().order_by(Lower("name")),
+        required=False,
+    )
+    allocation_attribute_value = forms.CharField(label="Allocation Attribute Value", max_length=100, required=False)
+
+    status = forms.ModelMultipleChoiceField(
+        widget=forms.CheckboxSelectMultiple,
+        queryset=AllocationStatusChoice.objects.all().order_by(Lower("name")),
+        required=False,
+    )

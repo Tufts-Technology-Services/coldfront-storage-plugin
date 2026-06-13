@@ -1,10 +1,10 @@
 import logging
-from coldfront_utils import units_to_bytes
+from coldfront_utils import units_to_bytes, update_allocation_attribute_value
 from django_q.tasks import async_task
 from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType, AttributeType
 from storage.utils import get_attribute_value, get_client_config
 from .models import StorageHandler
-from .constants import (QUOTA_ATTRIBUTE_NAME, 
+from .constants import (QUOTA_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS, 
                         GROUP_ATTRIBUTE_NAME, STORAGE_LOG_ONLY)
 
@@ -67,7 +67,10 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
     """
     if STORAGE_LOG_ONLY:
         logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual update of storage quota and just logging info.")
-    storage_handler, allocation = get_storage_handler(allocation_pk)
+    
+    allocation = Allocation.objects.get(id=allocation_pk)
+    update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'pending')
+    storage_handler = get_storage_handler(allocation)
     if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_id:
         client_config = get_client_config(storage_handler.quota_client_id)
         new_quota = allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value # todo: make sure this contains the new value. 
@@ -75,22 +78,30 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
         native_path = allocation.allocationattribute_set.filter(allocation_attribute_type__name=client_config['native_path_attribute_name']).first().value
         if native_path and new_quota_bytes:
             if STORAGE_LOG_ONLY:
+                update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'success')
                 logger.info(f"--STORAGE_LOG_ONLY")
                 logger.info(f"Would call task '{storage_handler.set_quota_task}' for allocation {allocation_pk} with native path: {native_path} and new quota (bytes): {new_quota_bytes}")
                 return
-            async_task(storage_handler.set_quota_task, native_path, new_quota_bytes, storage_handler.quota_client_id, allocation_pk)
+            task_id = async_task(storage_handler.set_quota_task, native_path, new_quota_bytes, storage_handler.quota_client_id, allocation_pk)
+            update_allocation_attribute_value(allocation, QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME, task_id)
+            logger.debug(f"Started async task {task_id} to update storage quota for allocation {allocation_pk}.")
         else:
-            logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
-            raise ValueError(f"Missing required information to create share for allocation {allocation_pk}.")
+            logger.error(f"Missing required information to update quota for allocation {allocation_pk}.")
+            update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'failed: missing information')
+            raise ValueError(f"Missing required information to update quota for allocation {allocation_pk}.")
     else:
         logger.warning(f"No quota update task or client configured for resource {storage_handler.resource.name} associated with allocation {allocation_pk}. Cannot update storage quota.")
+        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'failed: no quota update task or client configured')
 
 
 
 def create_share(allocation_pk: int):
     if STORAGE_LOG_ONLY:
         logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual creation of storage share and just logging info.")
-    storage_handler, allocation = get_storage_handler(allocation_pk)
+    allocation = Allocation.objects.get(id=allocation_pk)
+    update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'pending')
+    storage_handler = get_storage_handler(allocation)
+
     if storage_handler and storage_handler.create_share_task and storage_handler.create_client_id:
         client_config = get_client_config(storage_handler.create_client_id)
         native_path = allocation.allocationattribute_set.filter(allocation_attribute_type__name=client_config['native_path_attribute_name']).first().value
@@ -106,19 +117,23 @@ def create_share(allocation_pk: int):
                 group = pa.first().value
         if group and owner and native_path and quota_bytes:
             if STORAGE_LOG_ONLY:
+                update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
                 logger.info(f"--STORAGE_LOG_ONLY")
                 logger.info(f"Would call task '{storage_handler.create_share_task}' for allocation {allocation_pk} with native path: {native_path}, quota (bytes): {quota_bytes}, owner: {owner}, and group: {group}")
                 return
-            async_task(storage_handler.create_share_task, native_path, quota_bytes, owner, group, storage_handler.quota_client_id, allocation_pk)
+            task_id = async_task(storage_handler.create_share_task, native_path, quota_bytes, owner, group, storage_handler.quota_client_id, allocation_pk)
+            update_allocation_attribute_value(allocation, SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, task_id)
+            logger.debug(f"Started async task {task_id} to create share for allocation {allocation_pk}.")
         else:
+            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed: missing information')
             logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
             raise ValueError(f"Missing required information to create share for allocation {allocation_pk}.")
     else:
+        update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed: no share creation task or client configured')
         logger.warning(f"No share creation task or client configured for resource {storage_handler.resource.name} associated with allocation {allocation_pk}. Cannot create share.")
 
 
-def get_storage_handler(allocation_id):
-    allocation = Allocation.objects.get(id=allocation_id)
+def get_storage_handler(allocation):
     resources =  allocation.resources.filter(resource_type__name="Storage")
     if resources.count() != 1:
         logger.warning(f"Allocation {allocation.pk} is associated with {resources.count()} storage resources. Expected exactly 1. Cannot determine which resource to use to get storage handler.")
@@ -128,11 +143,12 @@ def get_storage_handler(allocation_id):
     if not storage_handler:
         logger.warning(f"No StorageHandler configured for resource(s) associated with allocation {allocation.pk}. Cannot get storage handler.")
         return None
-    return storage_handler, allocation
+    return storage_handler
 
 
 def add_attributes_to_new_storage_allocation(allocation_pk: int):
-    storage_handler, allocation = get_storage_handler(allocation_pk)
+    allocation = Allocation.objects.get(id=allocation_pk)
+    storage_handler = get_storage_handler(allocation)
     client_ids = set([storage_handler.usage_client_id, storage_handler.quota_client_id, storage_handler.create_client_id])
     for client_id in client_ids:
         client_config = get_client_config(client_id)

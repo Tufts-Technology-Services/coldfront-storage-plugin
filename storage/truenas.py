@@ -2,6 +2,7 @@ import datetime
 import logging
 
 from coldfront.core.resource.models import Resource
+from coldfront.core.allocation.models import Allocation
 from coldfront_utils import (bytes_to_units, 
                              update_allocation_attribute_value, 
                              validate_posix_path,
@@ -9,21 +10,29 @@ from coldfront_utils import (bytes_to_units,
 
 from .utils import update_allocation_attribute_value, get_client_config
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
-                        QUOTA_REPORT_DATE_ATTRIBUTE_NAME, 
+                        QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS)
 
 logger = logging.getLogger(__name__)
 
 
 def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocation_pk: int) -> None:
-    tc = get_truenas_client(client_config_id)
-    truenas_path = native_path.strip() # remove any leading or trailing whitespace
-    validate_posix_path(truenas_path) # validate the path before using it to set the quota
-    share_details = tc.get_dataset_info(truenas_path, details=True)
-    if not share_details:
-        raise ValueError(f"Dataset {truenas_path} does not exist. Please create it first.")
-    # truenas path looks like f"/mnt/{conf['parent_dataset']}/{project_name}"
-    tc.update_quota(truenas_path, quota_bytes)
+    try:
+        allocation = Allocation.objects.get(id=allocation_pk)
+        tc = get_truenas_client(client_config_id)
+        truenas_path = native_path.strip() # remove any leading or trailing whitespace
+        validate_posix_path(truenas_path) # validate the path before using it to set the quota
+        share_details = tc.get_dataset_info(truenas_path, details=True)
+        if not share_details:
+            raise ValueError(f"Dataset {truenas_path} does not exist. Please create it first.")
+        # truenas path looks like f"/mnt/{conf['parent_dataset']}/{project_name}"
+        tc.update_quota(truenas_path, quota_bytes)
+        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'success')
+    except Exception as e:
+        logger.error(f"Error setting quota for path {native_path} in TrueNAS: {e}")
+        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'failed')
+        raise e
+
 
 
 def get_quotas_batch(resource_id, client_config_id):
@@ -51,26 +60,32 @@ def get_quotas_batch(resource_id, client_config_id):
 
 
 def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
-    truenas_path = native_path.strip() # remove any leading or trailing whitespace
-    validate_posix_path(truenas_path) # validate the path before using it to set the quota
-    
-    tc = get_truenas_client(client_config_id)
-    # check if share exists
-    logger.debug("checking share details...")
-    share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
-    # based on share details, request share creation
-    if share_details['dataset_exists'] and share_details['quota_matches'] and share_details['starfish_share_exists'] and share_details['globus_share_exists']:
-        logger.info(f"Share {truenas_path} already exists with quota {quota_bytes}. No action needed.")
-    else:
-        logger.info("creating/updating share on tier2...")
-        # get uid, gid, and quota for this allocation
-        uid = get_uid(owner)
-        gid = get_gid(group)
-        tc.create_project_share(truenas_path, quota_bytes, uid, gid, create_dataset=(not share_details['dataset_exists']),
-                                create_globus_share=(not share_details['globus_share_exists']),
-                                create_starfish_share=(not share_details['starfish_share_exists']),
-                                create_gateway_share=(not share_details['gateway_share_exists']))
-        logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
+    try:
+        truenas_path = native_path.strip() # remove any leading or trailing whitespace
+        validate_posix_path(truenas_path) # validate the path before using it to set the quota
+        
+        tc = get_truenas_client(client_config_id)
+        # check if share exists
+        logger.debug("checking share details...")
+        share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
+        # based on share details, request share creation
+        if share_details['dataset_exists'] and share_details['quota_matches'] and share_details['starfish_share_exists'] and share_details['globus_share_exists']:
+            logger.info(f"Share {truenas_path} already exists with quota {quota_bytes}. No action needed.")
+        else:
+            logger.info("creating/updating share on tier2...")
+            # get uid, gid, and quota for this allocation
+            uid = get_uid(owner)
+            gid = get_gid(group)
+            tc.create_project_share(truenas_path, quota_bytes, uid, gid, create_dataset=(not share_details['dataset_exists']),
+                                    create_globus_share=(not share_details['globus_share_exists']),
+                                    create_starfish_share=(not share_details['starfish_share_exists']),
+                                    create_gateway_share=(not share_details['gateway_share_exists']))
+            logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
+        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
+    except Exception as e:
+        logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
+        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        raise e
 
 
 def get_truenas_client(client_config_id):

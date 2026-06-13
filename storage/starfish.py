@@ -3,7 +3,9 @@ import logging
 
 from coldfront.core.allocation.models import AllocationAttribute
 from coldfront.core.resource.models import Resource
-from coldfront_utils import ttl_cache
+from coldfront_utils import ttl_cache, update_allocation_attribute_value
+
+from storage.constants import USAGE_MATCH_ATTRIBUTE_NAME
 from .utils import update_allocation_usage, get_client_config
 
 logger = logging.getLogger(__name__)
@@ -52,13 +54,17 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
                 validate_starfish_path(vol_path.value)
             except ValueError as e:
                 logger.warning(f"Skipping allocation {vol_path.allocation.pk} with invalid Starfish path '{vol_path.value}': {e}")
+                update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
                 continue
             usage, report_date = get_path_usage_data(volume_data, vol_path.value)
             if usage and report_date:
                 logger.info(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
                 update_allocation_usage(vol_path.allocation, usage, report_date)
+                update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "Yes")
             else:
                 logger.warning(f"No matching subfolder found for allocation attribute with vol_path value {vol_path.value}")
+                update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
+
     return True
 
 
