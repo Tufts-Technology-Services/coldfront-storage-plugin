@@ -1,13 +1,19 @@
 import logging
 from django.dispatch import receiver
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
-from coldfront.core.allocation.signals import (allocation_activate, allocation_attribute_changed, allocation_new)
+from coldfront.core.allocation.signals import (allocation_activate, 
+                                               allocation_attribute_changed, 
+                                               allocation_new, allocation_change_created)
 from coldfront.core.allocation.views import (AllocationCreateView, AllocationDetailView, 
-                                             AllocationChangeDetailView, AllocationAttributeEditView)
+                                             AllocationChangeDetailView, 
+                                             AllocationChangeView,
+                                             AllocationAttributeEditView)
 
 from .constants import QUOTA_ATTRIBUTE_NAME
 from .tasks import set_storage_quota, create_share
-
+from .context_storage import get_request_username
+from .utils import (stamp_allocation_requester, stamp_allocation_approver, 
+                    stamp_quota_requester, stamp_quota_approver)
 logger = logging.getLogger(__name__)
 
 
@@ -16,21 +22,44 @@ logger = logging.getLogger(__name__)
 def activate_storage_allocation(sender, **kwargs):
     allocation_pk = kwargs.get('allocation_pk')
     allocation = Allocation.objects.get(pk=allocation_pk)
-    if allocation.status.name not in ['Active']:
-        logger.debug(f"Allocation {allocation_pk} is not active. Skipping storage provisioning.")
-        return
-    create_share(allocation_pk) # create share first, since setting the quota may depend on the share existing in some storage system
+    if allocation.resources.first().resource_type.name == 'Storage':
+        if allocation.status.name not in ['Active']:
+            logger.debug(f"Allocation {allocation_pk} is not active. Skipping storage provisioning.")
+            return
+        stamp_allocation_approver(allocation, get_request_username() or 'unknown')
+        create_share(allocation_pk)
 
 
 @receiver(allocation_attribute_changed, sender=AllocationChangeDetailView)
 @receiver(allocation_attribute_changed, sender=AllocationAttributeEditView)
-def allocation_attribute_changed_handler(sender, **kwargs):
+def allocation_quota_changed_handler(sender, **kwargs):
     allocation_pk = kwargs.get('allocation_pk')
     attribute_pk = kwargs.get('attribute_pk')
-    attribute_name = AllocationAttribute.objects.get(id=attribute_pk).allocation_attribute_type.name
-    if attribute_name == QUOTA_ATTRIBUTE_NAME:
-        # quota change
-        set_storage_quota(allocation_pk, allocation_attribute_change_id=attribute_pk)
+    allocation = Allocation.objects.get(pk=allocation_pk)
+    if allocation.resources.first().resource_type.name == 'Storage':
+        attribute_name = AllocationAttribute.objects.get(id=attribute_pk).allocation_attribute_type.name
+        if attribute_name == QUOTA_ATTRIBUTE_NAME:
+            # quota change
+            stamp_quota_approver(allocation, get_request_username() or 'unknown')
+            set_storage_quota(allocation_pk, allocation_attribute_change_id=attribute_pk)
+
+
+@receiver(allocation_new, sender=AllocationCreateView)
+def add_allocation_requester_info(sender, **kwargs):
+    allocation_pk = kwargs.get('allocation_pk')
+    allocation = Allocation.objects.get(pk=allocation_pk)
+    if allocation.resources.first().resource_type.name == 'Storage':
+        requester = get_request_username() or 'unknown'
+        stamp_allocation_requester(allocation, requester)
+
+
+@receiver(allocation_change_created, sender=AllocationChangeView)
+def add_change_requester_info(sender, **kwargs):
+    allocation_pk = kwargs.get('allocation_pk')
+    allocation = Allocation.objects.get(pk=allocation_pk)
+    if allocation.resources.first().resource_type.name == 'Storage':
+        requester = get_request_username() or 'unknown'
+        stamp_quota_requester(allocation, requester)
 
 
 def enable_add_attributes():
