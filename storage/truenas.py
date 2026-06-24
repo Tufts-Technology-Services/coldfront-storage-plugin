@@ -5,9 +5,8 @@ from coldfront.core.resource.models import Resource
 from coldfront.core.allocation.models import Allocation
 from coldfront_utils import (bytes_to_units, 
                              update_allocation_attribute_value, 
-                             validate_posix_path,
-                             ADSearch)
-
+                             validate_posix_path)
+from coldfront_utils.util.ad_search import ADSearch
 from .utils import update_allocation_attribute_value, get_client_config
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
                         QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
