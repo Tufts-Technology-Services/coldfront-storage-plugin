@@ -214,7 +214,8 @@ def get_vast_params(client_config_id: str):
         "protocols": valid_protocols,
         "quota_margin_percent": margin_percent,
         "snapshot_name_template": str(client_config.get("snapshot_name_template")),
-        "cluster_path_template": str(client_config.get("cluster_path_template", "/cluster/{directory_name}"))
+        "cluster_path_template": str(client_config.get("cluster_path_template", "/cluster/{directory_name}")),
+        "smb_admin_acls": client_config.get("smb_admin_acls", {})
     }
 
 
