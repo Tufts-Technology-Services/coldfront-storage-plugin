@@ -136,7 +136,9 @@ def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str,
         vc = get_vast_client(client_config_id)
         params = get_vast_params(client_config_id)
         ad_search = ADSearch("", "")
-        group_info = ad_search.get_group_info(group)
+        group_info = ad_search.get_ad_group(group)
+        if not group_info:
+            raise ValueError(f"Group {group} does not exist in Active Directory. Cannot create SMB share without a valid group.")
         if native_path and quota_bytes:
             vast_path = native_path.strip() # remove any leading or trailing whitespace
             validate_posix_path(vast_path) # validate the path before using it to set the quota
