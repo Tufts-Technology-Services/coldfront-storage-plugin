@@ -26,6 +26,7 @@ def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocat
         if not share_details:
             raise ValueError(f"Dataset {truenas_path} does not exist. Please create it first.")
         # truenas path looks like f"/mnt/{conf['parent_dataset']}/{project_name}"
+        logger.info(f"Setting quota for path {truenas_path} to {quota_bytes / 10**12} TB")
         tc.update_quota(truenas_path, quota_bytes)
         update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'success')
     except Exception as e:
@@ -70,9 +71,9 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
         share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
         # based on share details, request share creation
         if share_details['dataset_exists'] and share_details['quota_matches'] and share_details['starfish_share_exists'] and share_details['globus_share_exists']:
-            logger.info(f"Share {truenas_path} already exists with quota {quota_bytes}. No action needed.")
+            logger.info(f"Share {truenas_path} already exists with quota {quota_bytes / 10**12} TB. No action needed.")
         else:
-            logger.info("creating/updating share on tier2...")
+            logger.info(f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB...")
             # get uid, gid, and quota for this allocation
             ad_search = ADSearch('', '')
             owner_results = ad_search.get_ad_user(owner)

@@ -70,8 +70,8 @@ def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocat
             if len(quota_match) == 0:
                 logger.error(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
                 raise ValueError(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
-            logger.info(f"Updating quota for path {vast_path} to {quota_bytes} bytes")
-            logger.info(f"Quota match details: {quota_match[0]}")
+            logger.info(f"Updating quota for path {vast_path} to {quota_bytes / 10**12} TB")
+            logger.debug(f"Quota match details: {quota_match[0]}")
             vc.update_quota_size(quota_match[0]['id'], quota_bytes)
             update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'success')
         else:
@@ -96,6 +96,7 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
                 logger.warning(f"{vast_path} View already exists")
             else:
                 share_name = None if not params.get("include_share") else f"{vast_path.name}$"
+                logger.info(f"Creating view {vast_path}")
                 vc.add_view(path=vast_path, protocols=params.get("protocols"),
                             policy_id=params.get("view_policy_id"), share_name=share_name)
             quota_obj = vc.get_quotas(path=vast_path)
@@ -106,6 +107,7 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
                 margin_percent = params.get("quota_margin_percent", 0)
                 if margin_percent > 0:
                     soft_limit = int(quota_bytes * (100 - margin_percent) / 100)
+                logger.info(f"Creating quota for {vast_path} with hard limit {quota_bytes / 10**12} TB and soft limit {soft_limit / 10**12} TB")
                 vc.add_quota(name=vast_path.name,
                             path=vast_path,
                             hard_limit=quota_bytes,
@@ -114,13 +116,14 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
             if len(protected_path) > 0:
                 logger.warning(f"{vast_path} Protected path already exists")
             else:
+                logger.info(f"Creating protected path for {vast_path} with snapshot name {params.get('snapshot_name_template').format(vast_path.name)}")
                 vc.add_protected_path(name=params.get("snapshot_name_template").format(vast_path.name),
                                     source_dir=vast_path,
                                     tenant_id=params.get("tenant_id"),
                                     protection_policy_id=params.get("protection_policy_id"))
             update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
         else:
-            raise ValueError(f"Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
+            raise ValueError(f"Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes.")
     except Exception as e:
         logger.error(f"Error creating share for path {native_path} in VAST: {e}")
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
@@ -145,10 +148,11 @@ def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str,
                 share_name = f"{vast_path.name}$"
                 # create acls
                 acls = [vc.create_acl_from_string(**acl) for acl in params['smb_admin_acls']]
-                acls.append(vc.create_acl_from_string(**{'perm': 'FULL', 'grantee': 'groups', 'sid_str': group_info.get('objectSid'), 'uid_or_gid': group_info.get('gidNumber', None)}))
+                acls.append(vc.create_acl_from_string(**{'perm': 'FULL', 'grantee': 'groups', 'sid_str': group_info.get('objectSid')[0], 'uid_or_gid': group_info.get('gidNumber', [None])[0]}))
+                logger.info(f"Creating SMB view {vast_path}")
                 vc.add_view(path=vast_path, protocols=params.get("protocols"),
                             policy_id=params.get("view_policy_id"), share_name=share_name,
-                            acls=admin_acls)
+                            acls=acls)
             quota_obj = vc.get_quotas(path=vast_path)
             if len(quota_obj) > 0:
                 logger.warning(f"{vast_path} Quota already exists")
@@ -157,6 +161,7 @@ def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str,
                 margin_percent = params.get("quota_margin_percent", 0)
                 if margin_percent > 0:
                     soft_limit = int(quota_bytes * (100 - margin_percent) / 100)
+                logger.info(f"Creating quota for {vast_path} with hard limit {quota_bytes / 10**12} TB and soft limit {soft_limit / 10**12} TB")
                 vc.add_quota(name=vast_path.name,
                             path=vast_path,
                             hard_limit=quota_bytes,
@@ -165,13 +170,14 @@ def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str,
             if len(protected_path) > 0:
                 logger.warning(f"{vast_path} Protected path already exists")
             else:
+                logger.info(f"Creating protected path for {vast_path} with snapshot name {params.get('snapshot_name_template').format(vast_path.name)}")
                 vc.add_protected_path(name=params.get("snapshot_name_template").format(vast_path.name),
                                     source_dir=vast_path,
                                     tenant_id=params.get("tenant_id"),
                                     protection_policy_id=params.get("protection_policy_id"))
             update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
         else:
-            raise ValueError(f"Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
+            raise ValueError(f"Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes.")
     except Exception as e:
         logger.error(f"Error creating share for path {native_path} in VAST: {e}")
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
