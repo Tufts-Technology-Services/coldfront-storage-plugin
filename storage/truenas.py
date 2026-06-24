@@ -6,7 +6,7 @@ from coldfront.core.allocation.models import Allocation
 from coldfront_utils import (bytes_to_units, 
                              update_allocation_attribute_value, 
                              validate_posix_path,
-                             get_gid, get_uid)
+                             ADSearch)
 
 from .utils import update_allocation_attribute_value, get_client_config
 from .constants import (QUOTA_ATTRIBUTE_NAME, 
@@ -74,8 +74,15 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
         else:
             logger.info("creating/updating share on tier2...")
             # get uid, gid, and quota for this allocation
-            uid = get_uid(owner)
-            gid = get_gid(group)
+            ad_search = ADSearch('', '')
+            owner_results = ad_search.get_ad_user(owner)
+            uid = owner_results.get('uidNumber', None)
+            if uid is None:
+                raise ValueError(f"Could not find UID for owner {owner} in AD")
+            group_results = ad_search.get_ad_group(group)
+            gid = group_results.get('gidNumber', None)
+            if gid is None:
+                raise ValueError(f"Could not find GID for group {group} in AD")
             tc.create_project_share(truenas_path, quota_bytes, uid, gid, create_dataset=(not share_details['dataset_exists']),
                                     create_globus_share=(not share_details['globus_share_exists']),
                                     create_starfish_share=(not share_details['starfish_share_exists']),

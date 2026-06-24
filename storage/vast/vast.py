@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from coldfront.core.resource.models import Resource
 from coldfront.core.allocation.models import Allocation
-from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path
+from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path, ADSearch
 from storage.utils import get_client_config
 from storage.constants import (QUOTA_ATTRIBUTE_NAME, 
                                QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
@@ -98,6 +98,57 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
                 share_name = None if not params.get("include_share") else f"{vast_path.name}$"
                 vc.add_view(path=vast_path, protocols=params.get("protocols"),
                             policy_id=params.get("view_policy_id"), share_name=share_name)
+            quota_obj = vc.get_quotas(path=vast_path)
+            if len(quota_obj) > 0:
+                logger.warning(f"{vast_path} Quota already exists")
+            else:
+                soft_limit = quota_bytes           
+                margin_percent = params.get("quota_margin_percent", 0)
+                if margin_percent > 0:
+                    soft_limit = int(quota_bytes * (100 - margin_percent) / 100)
+                vc.add_quota(name=vast_path.name,
+                            path=vast_path,
+                            hard_limit=quota_bytes,
+                            soft_limit=soft_limit)
+            protected_path = vc.get_protected_paths(source_dir=vast_path)
+            if len(protected_path) > 0:
+                logger.warning(f"{vast_path} Protected path already exists")
+            else:
+                vc.add_protected_path(name=params.get("snapshot_name_template").format(vast_path.name),
+                                    source_dir=vast_path,
+                                    tenant_id=params.get("tenant_id"),
+                                    protection_policy_id=params.get("protection_policy_id"))
+            update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
+        else:
+            raise ValueError(f"Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
+    except Exception as e:
+        logger.error(f"Error creating share for path {native_path} in VAST: {e}")
+        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        raise e
+    
+
+def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
+    try:
+        vc = get_vast_client(client_config_id)
+        params = get_vast_params(client_config_id)
+        ad_search = ADSearch("", "")
+        group_info = ad_search.get_group_info(group)
+        if native_path and quota_bytes:
+            vast_path = native_path.strip() # remove any leading or trailing whitespace
+            validate_posix_path(vast_path) # validate the path before using it to set the quota
+            vast_path = Path(vast_path) # convert to Path object for easier manipulation and to ensure consistent formatting
+            # view create will create the directory
+            view = vc.get_views(path=vast_path)
+            if len(view) > 0:
+                logger.warning(f"{vast_path} View already exists")
+            else:
+                share_name = f"{vast_path.name}$"
+                # create acls
+                acls = [vc.create_acl_from_string(**acl) for acl in params['smb_admin_acls']]
+                acls.append(vc.create_acl_from_string(**{'perm': 'FULL', 'grantee': 'groups', 'sid_str': group_info.get('objectSid'), 'uid_or_gid': group_info.get('gidNumber', None)}))
+                vc.add_view(path=vast_path, protocols=params.get("protocols"),
+                            policy_id=params.get("view_policy_id"), share_name=share_name,
+                            acls=admin_acls)
             quota_obj = vc.get_quotas(path=vast_path)
             if len(quota_obj) > 0:
                 logger.warning(f"{vast_path} Quota already exists")
