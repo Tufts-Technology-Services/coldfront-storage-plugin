@@ -150,7 +150,7 @@ def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str,
             else:
                 share_name = f"{vast_path.name}$"
                 # create acls
-                acls = [vc.create_acl_from_str(**acl) for acl in params['smb_admin_acls']]
+                acls = [vc.create_acl_from_str(**params['smb_admin_acls'])]
                 acls.append(vc.create_acl_from_str(**{'perm': 'FULL', 'grantee': 'groups', 'sid_str': group_info.get('objectSid')[0], 'uid_or_gid': group_info.get('gidNumber', [None])[0]}))
                 logger.info(f"Creating SMB view {vast_path}")
                 vc.add_view(path=vast_path, protocols=params.get("protocols"),
