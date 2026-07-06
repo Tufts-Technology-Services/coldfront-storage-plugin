@@ -5,7 +5,7 @@ import re
 from coldfront.core.project.models import ProjectAttribute
 from coldfront.core.resource.models import ResourceAttribute 
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
-from .constants import QUOTA_ATTRIBUTE_NAME, QUOTA_DISPLAY_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS, USAGE_REPORT_DATE_ATTRIBUTE_NAME
+from .constants import QUOTA_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS, USAGE_REPORT_DATE_ATTRIBUTE_NAME
 from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
 
 
