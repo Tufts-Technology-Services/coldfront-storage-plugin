@@ -26,7 +26,12 @@ def get_quotas_batch(resource_id, client_config_id):
             logger.info(f"Getting quota for allocation {allocation.pk} with path {vast_path}")
             try:
                 q = get_quota(vast_path, client_config_id)
-                current_quota = q['soft_limit']
+                if 'soft_limit' in q and q['soft_limit'] is not None:
+                    current_quota = q['soft_limit']
+                elif 'hard_limit' in q and q['hard_limit'] is not None:
+                    current_quota = q['hard_limit']
+                else:
+                    current_quota = 0
                 report_date = datetime.datetime.now() # VAST API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
                 update_allocation_attribute_value(allocation, 
                                                   QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
