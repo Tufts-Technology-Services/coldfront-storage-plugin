@@ -8,7 +8,7 @@ from coldfront_utils import (bytes_to_units,
                              validate_posix_path)
 from coldfront_utils.util.ad_search import ADSearch
 from .utils import update_allocation_attribute_value, get_client_config
-from .constants import (QUOTA_ATTRIBUTE_NAME, 
+from .constants import (QUOTA_ATTRIBUTE_NAME, QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
                         QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS)
 
@@ -50,6 +50,9 @@ def get_quotas_batch(resource_id, client_config_id):
                 r = [q for q in all_quotas if q['mountpoint'] == storage_path]
                 current_quota = r[0]['quota']
                 report_date = datetime.datetime.now() # TrueNAS API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
+                update_allocation_attribute_value(allocation, 
+                                                  QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
+                                                  current_quota)
                 update_allocation_attribute_value(allocation, QUOTA_ATTRIBUTE_NAME, str(round(bytes_to_units(current_quota, STORAGE_PLUGIN_STORAGE_UNITS), 2))) 
                 update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
 
