@@ -6,7 +6,7 @@ from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, update_allocation_attribute_value
 
 from storage.constants import USAGE_MATCH_ATTRIBUTE_NAME
-from .utils import update_allocation_usage, get_client_config
+from storage.utils import update_allocation_usage, get_client_config
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
                 update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
                 continue
             usage, report_date = get_path_usage_data(volume_data, vol_path.value)
-            if usage and report_date:
+            if usage is not None and report_date:
                 logger.info(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
                 update_allocation_usage(vol_path.allocation, usage, report_date)
                 update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "Yes")

@@ -72,7 +72,7 @@ def get_all_quotas(client_config_id: str) -> list:
 def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocation_pk: int) -> None:
     try:
         vc = get_vast_client(client_config_id)
-        if native_path and quota_bytes:
+        if native_path and quota_bytes is not None:
             vast_path = native_path.strip() # remove any leading or trailing whitespace
             validate_posix_path(vast_path) # validate the path before using it to set the quota
             quota_match = vc.get_quotas(path=Path(vast_path))
