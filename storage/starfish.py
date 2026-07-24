@@ -58,7 +58,7 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
                 continue
             usage, _ = get_path_usage_data(volume_data, vol_path.value)
             if usage is not None:
-                report_date = datetime.now().isoformat()
+                report_date = datetime.now()
                 logger.info(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
                 update_allocation_usage(vol_path.allocation, usage, report_date)
                 update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "Yes")
