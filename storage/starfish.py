@@ -56,8 +56,9 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
                 logger.warning(f"Skipping allocation {vol_path.allocation.pk} with invalid Starfish path '{vol_path.value}': {e}")
                 update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
                 continue
-            usage, report_date = get_path_usage_data(volume_data, vol_path.value)
-            if usage is not None and report_date:
+            usage, _ = get_path_usage_data(volume_data, vol_path.value)
+            if usage is not None:
+                report_date = datetime.now().isoformat()
                 logger.info(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
                 update_allocation_usage(vol_path.allocation, usage, report_date)
                 update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "Yes")
@@ -92,8 +93,8 @@ def get_path_usage_data(volume_data, vol_path) -> tuple:
     match = [i for i in volume_data if i['vol_path'].lower() == vol_path.lower()]
     if match:
         usage = match[0]['logical_size']
-        report_date = datetime.fromtimestamp(match[0]['sync'])
-        return usage, report_date
+        last_synced = datetime.fromtimestamp(match[0]['sync'])
+        return usage, last_synced
     else:
         return None, None
 
