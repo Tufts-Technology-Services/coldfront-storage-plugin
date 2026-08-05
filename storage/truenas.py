@@ -79,14 +79,18 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
             # get uid, gid, and quota for this allocation
             ad_search = ADSearch('', '')
             owner_results = ad_search.get_ad_user(owner)
+            if not owner_results:
+                raise ValueError(f"Could not find owner {owner} in AD")
             uid = owner_results.get('uidNumber', None)
-            if uid is None:
+            if not uid:
                 raise ValueError(f"Could not find UID for owner {owner} in AD")
             group_results = ad_search.get_ad_group(group)
+            if not group_results:
+                raise ValueError(f"Could not find group {group} in AD")
             gid = group_results.get('gidNumber', None)
-            if gid is None:
+            if not gid:
                 raise ValueError(f"Could not find GID for group {group} in AD")
-            tc.create_project_share(truenas_path, quota_bytes, uid, gid, create_dataset=(not share_details['dataset_exists']),
+            tc.create_project_share(truenas_path, quota_bytes, uid[0], gid[0], create_dataset=(not share_details['dataset_exists']),
                                     create_globus_share=(not share_details['globus_share_exists']),
                                     create_starfish_share=(not share_details['starfish_share_exists']),
                                     create_gateway_share=(not share_details['gateway_share_exists']))
