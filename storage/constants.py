@@ -16,3 +16,6 @@ SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME = ENV.str("SHARE_CREATION_TASK_ID_ATTRIBUT
 SHARE_CREATION_STATE_ATTRIBUTE_NAME = ENV.str("SHARE_CREATION_STATE_ATTRIBUTE_NAME", default="share_creation_state") # name of the allocation attribute where the state of the share creation will be stored (e.g., pending, successful, failed)
 QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME = ENV.str("QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME", default="quota_update_task_id") # name of the allocation attribute where the task id of the quota
 QUOTA_UPDATE_STATE_ATTRIBUTE_NAME = ENV.str("QUOTA_UPDATE_STATE_ATTRIBUTE_NAME", default="quota_update_state") # name of the allocation attribute where the state of the quota update will be stored (e.g., pending, successful, failed)
+POSIX_FILESYSTEM_HOST = ENV.str("POSIX_FILESYSTEM_HOST", default="localhost") # hostname or IP address of the filesystem server where the storage is mounted
+POSIX_FILESYSTEM_USER = ENV.str("POSIX_FILESYSTEM_USER", default="") # username to use when connecting to the filesystem server
+POSIX_FILESYSTEM_SSH_KEY = ENV.str("POSIX_FILESYSTEM_SSH_KEY", default="") # path to the SSH private key to use when connecting to the filesystem server
