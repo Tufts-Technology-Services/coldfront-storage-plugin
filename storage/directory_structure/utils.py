@@ -17,13 +17,13 @@ def create_subdirectory(parent_directory: Path = None,
 
     subdir = parent_directory / subdirectory_name
     try:
-        gstatus, _, gstderr = host.run_shell_command(f"getent group {group}")
+        gstatus, gout = host.run_shell_command(f"getent group {group}")
         if gstatus != 0:
-            raise PyinfraError(f"Group {group} does not exist: {gstderr}")
+            raise PyinfraError(f"Group {group} does not exist: {gout}")
         
-        ustatus, _, ustderr = host.run_shell_command(f"id -u {owner}")
+        ustatus, uout = host.run_shell_command(f"id -u {owner}")
         if ustatus != 0:
-            raise PyinfraError(f"User {owner} does not exist: {ustderr}")
+            raise PyinfraError(f"User {owner} does not exist: {uout}")
         
         r = files.directory(
             name=f"Create subdirectory {subdirectory_name} in {parent_directory}",
