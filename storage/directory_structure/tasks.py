@@ -27,7 +27,7 @@ def create_folders(allocation_pk: int, structure_type: str):
     else:
         logger.error(f"No cluster path found for allocation {allocation_pk}")
         raise ValueError(f"No cluster path found for allocation {allocation_pk}")
-    members = allocation.allocationuser_set.values_list('user__username', flat=True)
+    members = allocation.allocationuser_set.filter(status__name='Active').values_list('user__username', flat=True)
 
     if structure_type == "hpc_project":
         create_project_folders(cluster_path, owner, group, list(members))
