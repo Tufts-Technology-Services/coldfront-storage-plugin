@@ -16,29 +16,29 @@ class PosixDeploymentRunner:
 
     def run(self):
         if POSIX_FILESYSTEM_HOST == "localhost":
-            return __pyinfra_run(self.deployments, (["@local"], {}))
+            return self.__pyinfra_run(self.deployments, (["@local"], {}))
         else:
-            return __pyinfra_run(self.deployments, ([POSIX_FILESYSTEM_HOST], {}), ssh_user=POSIX_FILESYSTEM_USER, ssh_key=POSIX_FILESYSTEM_SSH_KEY)
+            return self.__pyinfra_run(self.deployments, ([POSIX_FILESYSTEM_HOST], {}), ssh_user=POSIX_FILESYSTEM_USER, ssh_key=POSIX_FILESYSTEM_SSH_KEY)
 
 
-def __pyinfra_run(deployments, hosts, ssh_user=None, ssh_key=None) -> list:
-    override_data = {}
-    if ssh_user:
-        override_data['ssh_user'] = ssh_user
-    if ssh_key:
-        override_data['ssh_key'] = ssh_key
+    def __pyinfra_run(self, deployments, hosts, ssh_user=None, ssh_key=None) -> list:
+        override_data = {}
+        if ssh_user:
+            override_data['ssh_user'] = ssh_user
+        if ssh_key:
+            override_data['ssh_key'] = ssh_key
 
-    state = State(inventory=Inventory(hosts, override_data=override_data),
-                  config=Config(SUDO=True))
-    try:
-        connect_all(state)
-        for deployment in deployments:
-            add_deploy(state, deployment[0], **deployment[1])
+        state = State(inventory=Inventory(hosts, override_data=override_data),
+                    config=Config(SUDO=True))
+        try:
+            connect_all(state)
+            for deployment in deployments:
+                add_deploy(state, deployment[0], **deployment[1])
 
-        run_ops(state)
-        return state
-    except PyinfraError as e:
-        print(f"Error running deployments: {e}")
-        raise e
-    finally:
-        disconnect_all(state)
+            run_ops(state)
+            return state
+        except PyinfraError as e:
+            print(f"Error running deployments: {e}")
+            raise e
+        finally:
+            disconnect_all(state)

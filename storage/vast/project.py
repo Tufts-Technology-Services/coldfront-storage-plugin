@@ -36,8 +36,7 @@ def create_project_share(native_path: str, quota_bytes: int, owner: str, group: 
         cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
 
         create_project_folders(cluster_path, owner=owner, 
-                            group=group,
-                            allocation_pk=allocation_pk)
+                            group=group, members=None)
 
     except Exception as e:
         logger.error(f"Error creating project share for path {native_path} in VAST: {e}")
