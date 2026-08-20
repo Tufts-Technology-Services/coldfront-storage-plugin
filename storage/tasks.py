@@ -7,8 +7,10 @@ from storage.directory_structure.tasks import create_folders
 from storage.models import StorageHandler
 from storage.utils import get_allocation_group
 from storage.constants import (QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME, 
-                               SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
-                               SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, 
+                               QUOTA_ATTRIBUTE_NAME,
+                               QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
+                               SHARE_CREATION_STATE_ATTRIBUTE_NAME,
+                               SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
                                STORAGE_PLUGIN_STORAGE_UNITS, 
                                STORAGE_LOG_ONLY)
 
