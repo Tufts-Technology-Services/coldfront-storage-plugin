@@ -17,6 +17,7 @@ def create_subdirectory(parent_directory: Path = None,
 
     subdir = parent_directory / subdirectory_name
     try:
+        r = None
         gstatus, gout = host.run_shell_command(f"getent group {group}")
         if gstatus != 0:
             raise PyinfraError(f"Group {group} does not exist: {gout}")
@@ -45,7 +46,8 @@ def create_subdirectory(parent_directory: Path = None,
         logger.error(f"Error creating subdirectory {subdirectory_name} in {parent_directory}: {e}")
         def error_callback(resp):
             logger.error(resp.stderr)
-        if r:
+            
+        if r is not None:
             python.call(
                 name="Execute error callback function",
                 function=error_callback,
