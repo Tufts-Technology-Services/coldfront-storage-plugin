@@ -5,7 +5,7 @@ import re
 from coldfront.core.project.models import ProjectAttribute
 from coldfront.core.resource.models import ResourceAttribute 
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
-from .constants import QUOTA_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS, USAGE_REPORT_DATE_ATTRIBUTE_NAME
+from .constants import GROUP_ATTRIBUTE_NAME, QUOTA_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS, USAGE_REPORT_DATE_ATTRIBUTE_NAME
 from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
 
 
@@ -146,3 +146,15 @@ def validate_dirname(name, max_length=30):
     is_valid = re.match("^[a-z0-9_-]+$", name) and len(name) < max_length and name.islower() and name[0].isalpha()
     if not is_valid:
         raise ValueError(f'Invalid name for directory: {name}')
+
+
+def get_allocation_group(allocation):
+    group = None
+    aa = allocation.allocationattribute_set.filter(allocation_attribute_type__name=GROUP_ATTRIBUTE_NAME) # make sure the group attribute type exists
+    if aa.exists():
+        group = aa.first().value
+    else:            
+        pa = allocation.project.projectattribute_set.filter(proj_attr_type__name=GROUP_ATTRIBUTE_NAME)
+        if pa.exists():
+            group = pa.first().value
+    return group

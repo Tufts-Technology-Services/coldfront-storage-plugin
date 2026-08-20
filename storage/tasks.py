@@ -3,10 +3,14 @@ from coldfront_utils import units_to_bytes, update_allocation_attribute_value
 from django_q.tasks import async_task
 from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType, AttributeType
 from storage.utils import get_attribute_value, get_client_config
-from .models import StorageHandler
-from .constants import (QUOTA_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, 
-                        STORAGE_PLUGIN_STORAGE_UNITS, 
-                        GROUP_ATTRIBUTE_NAME, STORAGE_LOG_ONLY)
+from storage.directory_structure.tasks import create_folders
+from storage.models import StorageHandler
+from storage.utils import get_allocation_group
+from storage.constants import (QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME, 
+                               SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
+                               SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, 
+                               STORAGE_PLUGIN_STORAGE_UNITS, 
+                               STORAGE_LOG_ONLY)
 
 logger = logging.getLogger(__name__)
 
@@ -106,14 +110,7 @@ def create_share(allocation_pk: int):
         native_path = allocation.allocationattribute_set.filter(allocation_attribute_type__name=client_config['native_path_attribute_name']).first().value
         quota_bytes = units_to_bytes(float(allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).first().value), units=STORAGE_PLUGIN_STORAGE_UNITS)
         owner = allocation.project.pi.username
-        group = None
-        aa = allocation.allocationattribute_set.filter(allocation_attribute_type__name=GROUP_ATTRIBUTE_NAME) # make sure the group attribute type exists
-        if aa.exists():
-            group = aa.first().value
-        else:            
-            pa = allocation.project.projectattribute_set.filter(proj_attr_type__name=GROUP_ATTRIBUTE_NAME)
-            if pa.exists():
-                group = pa.first().value
+        group = get_allocation_group(allocation)
         if group and owner and native_path and quota_bytes:
             if STORAGE_LOG_ONLY:
                 update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
@@ -133,8 +130,7 @@ def create_share(allocation_pk: int):
 
 
 def create_directory(allocation_pk: int, structure_type: str):
-    allocation = Allocation.objects.get(id=allocation_pk)
-    task_id = async_task(storage_handler.create_directory_task, allocation_pk)
+    task_id = async_task(create_folders, allocation_pk, structure_type)
     logger.debug(f"Started async task {task_id} to create directory for allocation {allocation_pk}.")
 
 

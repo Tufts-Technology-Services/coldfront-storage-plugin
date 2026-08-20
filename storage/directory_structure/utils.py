@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path
 from pyinfra.operations import files, python
 from pyinfra.api.exceptions import PyinfraError
 from pyinfra import host
+
+logger = logging.getLogger(__name__)
 
 
 def create_subdirectory(parent_directory: Path = None,
@@ -31,16 +34,16 @@ def create_subdirectory(parent_directory: Path = None,
         )
         def success_callback():
             if r.stdout:    
-              print(f"Got result: {r.stdout}")
+              logger.info(f"Got result: {r.stdout}")
     
         python.call(
             name="Execute callback function",
             function=success_callback,
         )
     except PyinfraError as e:
-        print(f"Error creating subdirectory {subdirectory_name} in {parent_directory}: {e}")
+        logger.error(f"Error creating subdirectory {subdirectory_name} in {parent_directory}: {e}")
         def error_callback():
-            print(r.stderr)
+            logger.error(r.stderr)
 
         python.call(
             name="Execute error callback function",
