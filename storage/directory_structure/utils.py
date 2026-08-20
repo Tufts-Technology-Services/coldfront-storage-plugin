@@ -32,20 +32,22 @@ def create_subdirectory(parent_directory: Path = None,
             group=group,
             mode=mode,
         )
-        def success_callback():
-            if r.stdout:    
-              logger.info(f"Got result: {r.stdout}")
+        def success_callback(resp):
+            if resp.stdout:    
+              logger.info(f"Got result: {resp.stdout}")
     
         python.call(
             name="Execute callback function",
             function=success_callback,
+            args=([r],)
         )
     except PyinfraError as e:
         logger.error(f"Error creating subdirectory {subdirectory_name} in {parent_directory}: {e}")
-        def error_callback():
-            logger.error(r.stderr)
-
-        python.call(
-            name="Execute error callback function",
-            function=error_callback,
-        )
+        def error_callback(resp):
+            logger.error(resp.stderr)
+        if r:
+            python.call(
+                name="Execute error callback function",
+                function=error_callback,
+                args=([r],)
+            )
