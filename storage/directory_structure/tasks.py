@@ -30,9 +30,9 @@ def create_folders(allocation_pk: int, structure_type: str):
     members = allocation.allocationuser_set.values_list('user__username', flat=True)
 
     if structure_type == "hpc_project":
-        create_project_folders(cluster_path, owner, group, members)
+        create_project_folders(cluster_path, owner, group, list(members))
     elif structure_type == "hpc_course":
-        create_course_folders(cluster_path, owner, group, members)
+        create_course_folders(cluster_path, owner, group, list(members))
     else:
         logger.error(f"Unknown structure type {structure_type}. Cannot create folders.")
         raise ValueError(f"Unknown structure type {structure_type}. Cannot create folders.")

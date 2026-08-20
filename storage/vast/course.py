@@ -22,7 +22,7 @@ def create_course_share(native_path: str, quota_bytes: int, owner: str, group: s
         create_course_folders(cluster_path=cluster_path,
                               owner=owner,
                               group=group,
-                              allocation_pk=allocation_pk)
+                              members=[])
     except Exception as e:
         logger.error(f"Error creating course share for path {cluster_path}: {e}")
         update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
