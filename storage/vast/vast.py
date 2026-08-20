@@ -90,6 +90,7 @@ def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocat
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'failed')
         raise e
 
+
 def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
     try:
         vc = get_vast_client(client_config_id)

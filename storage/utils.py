@@ -116,3 +116,33 @@ def create_private_allocation_attribute(allocation, attribute_name, attribute_va
         allocation_attribute_type=attr_type,
         value=attribute_value,
     )
+
+
+def validate_username(name):
+    """
+    Validate the username. Must be alphanumeric, lowercase, and start with a letter.
+    """
+    is_valid = name.isalnum() and len(name) < 10 and len(name) > 2 and name.islower() and name[0].isalpha()
+    if not is_valid:
+        raise ValueError(f'Invalid name for user: {name}')
+
+
+def validate_groupname(name, max_length=35):
+    """
+    Validate the group name. a little longer than usernames, also allows underscores and dashes 
+    except for the first or last character.
+    """
+    if name.lower() in ['tts_rsch_beta_cluster_login', 'tts_rsch_hpc_cluster_login']:
+        raise ValueError(f'Group name {name.lower()} is reserved and cannot be used.')
+    is_valid = re.match("^[a-z0-9_-]+$", name) and len(name) < max_length and name.islower() and name[0].isalpha() and name[-1].isalnum()
+    if not is_valid:
+        raise ValueError(f'Invalid name for group: {name}')
+
+
+def validate_dirname(name, max_length=30):
+    """
+    Validate the directory name. a little longer than usernames, also allows underscores and dashes
+    except for the first character."""
+    is_valid = re.match("^[a-z0-9_-]+$", name) and len(name) < max_length and name.islower() and name[0].isalpha()
+    if not is_valid:
+        raise ValueError(f'Invalid name for directory: {name}')

@@ -1,5 +1,6 @@
 from pathlib import Path
 from pyinfra.api import deploy
+from pyinfra.operations import server
 from .utils import create_subdirectory
 
 
@@ -10,6 +11,11 @@ def deploy_project_directory(parent_directory: Path = None,
     #todo: make sure that the project_name is valid and does not contain any special characters or spaces
     #todo: make sure that the owner and group are valid and exist on the system
     
+    server.shell(
+        name="Run a custom shell command",
+        commands=["echo 'Hello from pyinfra script'", "uname -a"],
+    )
+
     create_subdirectory(parent_directory=parent_directory,
                         subdirectory_name=project_directory,
                         owner=owner,

@@ -10,9 +10,7 @@ def deploy_course_directory(parent_directory: Path = None,
                             owner: str = None,
                             group: str = None,
                             admin_group: str = None):
-    #todo: make sure that the directory_name is valid and does not contain any special characters or spaces
-    #todo: make sure that the owner and group are valid and exist on the system
-    
+   
     create_subdirectory(parent_directory=parent_directory,
                         subdirectory_name=course_directory,
                         owner=owner,
@@ -31,7 +29,7 @@ def deploy_course_directory(parent_directory: Path = None,
         course_members = [owner]  # If no course members are provided, create a list with just the owner
     for course_member in course_members:
         create_subdirectory(parent_directory=parent_directory / course_directory,
-                            subdirectory_name=course_member, 
-                            owner=course_member, 
+                            subdirectory_name=course_member,
+                            owner=course_member,
                             group=admin_group,
                             mode="2770")

@@ -94,7 +94,6 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
         update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'failed: no quota update task or client configured')
 
 
-
 def create_share(allocation_pk: int):
     if STORAGE_LOG_ONLY:
         logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual creation of storage share and just logging info.")
@@ -131,6 +130,12 @@ def create_share(allocation_pk: int):
     else:
         update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed: no share creation task or client configured')
         logger.warning(f"No share creation task or client configured for resource {storage_handler.resource.name} associated with allocation {allocation_pk}. Cannot create share.")
+
+
+def create_directory(allocation_pk: int, structure_type: str):
+    allocation = Allocation.objects.get(id=allocation_pk)
+    task_id = async_task(storage_handler.create_directory_task, allocation_pk)
+    logger.debug(f"Started async task {task_id} to create directory for allocation {allocation_pk}.")
 
 
 def get_storage_handler(allocation):
