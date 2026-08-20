@@ -19,11 +19,11 @@ def create_subdirectory(parent_directory: Path = None,
     try:
         r = None
         gstatus, gout = host.run_shell_command(f"getent group {group}")
-        if gstatus != 0:
+        if not gstatus:
             raise PyinfraError(f"Group {group} does not exist: {gout}")
         
         ustatus, uout = host.run_shell_command(f"id -u {owner}")
-        if ustatus != 0:
+        if not ustatus:
             raise PyinfraError(f"User {owner} does not exist: {uout}")
         
         r = files.directory(
@@ -46,7 +46,7 @@ def create_subdirectory(parent_directory: Path = None,
         logger.error(f"Error creating subdirectory {subdirectory_name} in {parent_directory}: {e}")
         def error_callback(resp):
             logger.error(resp.stderr)
-            
+
         if r is not None:
             python.call(
                 name="Execute error callback function",
