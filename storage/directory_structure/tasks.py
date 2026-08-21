@@ -1,11 +1,15 @@
+import datetime
 from pathlib import Path
 import logging
 
+from django_q.tasks import schedule, Schedule
+
 from coldfront.core.allocation.models import Allocation
+from coldfront_utils.util.ad_search import ADSearch
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME
 from storage.directory_structure.course import deploy_course_directory
 from storage.directory_structure.hpc_projects import deploy_project_directory
-from storage.utils import validate_dirname
+from storage.utils import GroupNotFoundError, validate_dirname
 from storage.directory_structure import PosixDeploymentRunner
 from storage.utils import get_allocation_group
 
@@ -13,7 +17,7 @@ from storage.utils import get_allocation_group
 logger = logging.getLogger(__name__)
 
 
-def create_folders(allocation_pk: int, structure_type: str):
+def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
     allocation = Allocation.objects.get(id=allocation_pk)
     owner = allocation.project.pi.username
     group = get_allocation_group(allocation)
@@ -27,7 +31,19 @@ def create_folders(allocation_pk: int, structure_type: str):
         logger.error(f"No cluster path found for allocation {allocation_pk}")
         raise ValueError(f"No cluster path found for allocation {allocation_pk}")
     members = allocation.allocationuser_set.filter(status__name='Active').values_list('user__username', flat=True)
-
+    ad_search = ADSearch('', '')
+    group_results = ad_search.get_ad_group(group)
+    if not group_results:
+        if retries <= 0:
+            raise GroupNotFoundError(f"Could not find group {group} in AD")
+        else:
+            schedule('storage.directory_structure.tasks.create_folders', kwargs={
+                    'allocation_pk': allocation_pk, 'structure_type': structure_type, 'retries': retries-1, 'wait': wait
+                    },
+                    schedule_type=Schedule.ONCE,
+                    next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
+            )
+            return
     if structure_type == "hpc_project":
         create_project_folders(cluster_path, owner, group, list(members))
     elif structure_type == "hpc_course":

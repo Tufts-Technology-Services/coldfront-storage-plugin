@@ -52,7 +52,7 @@ def create_project_share(native_path: str, quota_bytes: int, owner: str, group: 
                     schedule_type=Schedule.ONCE,
                     next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
             )
-                     
+            return
 
     except Exception as e:
         logger.error(f"Error creating project share for path {native_path} in VAST: {e}")
@@ -62,14 +62,19 @@ def create_project_share(native_path: str, quota_bytes: int, owner: str, group: 
 
 def create_project_share_file_structure(native_path: str, owner: str, group: str, client_config_id: str):
     ad_search = ADSearch('', '')
+
     owner_results = ad_search.get_ad_user(owner)
     if not owner_results:
+        logger.error(f"Could not find owner {owner} in AD")
         raise UserNotFoundError(f"Could not find owner {owner} in AD")
     uid = owner_results.get('uidNumber', None)
-    if not uid:
+    if uid is not None:
+        logger.error(f"Could not find UID for owner {owner} in AD")
         raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
+    
     group_results = ad_search.get_ad_group(group)
     if not group_results:
+        logger.error(f"Could not find group {group} in AD")
         raise GroupNotFoundError(f"Could not find group {group} in AD")
 
     cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))

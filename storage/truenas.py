@@ -126,6 +126,7 @@ def create_share_wait_for_group(native_path: str, quota_bytes: int, owner: str, 
                  },
                 schedule_type=Schedule.ONCE,
                 next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait))
+        return
     except Exception as e:
         logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
