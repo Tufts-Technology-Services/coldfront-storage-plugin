@@ -68,7 +68,7 @@ def create_project_share_file_structure(native_path: str, owner: str, group: str
         logger.error(f"Could not find owner {owner} in AD")
         raise UserNotFoundError(f"Could not find owner {owner} in AD")
     uid = owner_results.get('uidNumber', None)
-    if uid is not None:
+    if uid is None:
         logger.error(f"Could not find UID for owner {owner} in AD")
         raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
     
