@@ -5,8 +5,8 @@ from pathlib import Path
 from django_q.tasks import Schedule, schedule
 
 from coldfront.core.allocation.models import Allocation
-from coldfront_utils import update_allocation_attribute_value, ADSearch
-
+from coldfront_utils import update_allocation_attribute_value
+from coldfront_utils.util.ad_search import ADSearch
 from storage.constants import SHARE_CREATION_STATE_ATTRIBUTE_NAME
 from storage.utils import GroupNotFoundError, UIDNotFoundError, UserNotFoundError
 from .vast import create_share, native_path_to_cluster_path

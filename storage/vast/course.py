@@ -8,7 +8,7 @@ from coldfront.core.allocation.models import Allocation
 from coldfront_utils import update_allocation_attribute_value
 
 from storage.utils import GroupNotFoundError, UIDNotFoundError, UserNotFoundError
-from storage.utils import ADSearch
+from coldfront_utils.util.ad_search import ADSearch
 from .vast import create_share, native_path_to_cluster_path
 from storage.constants import SHARE_CREATION_STATE_ATTRIBUTE_NAME
 from storage.directory_structure.tasks import create_course_folders
