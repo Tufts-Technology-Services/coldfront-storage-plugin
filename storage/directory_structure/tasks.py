@@ -13,7 +13,6 @@ from storage.utils import get_allocation_group
 logger = logging.getLogger(__name__)
 
 
-
 def create_folders(allocation_pk: int, structure_type: str):
     allocation = Allocation.objects.get(id=allocation_pk)
     owner = allocation.project.pi.username
@@ -40,7 +39,6 @@ def create_folders(allocation_pk: int, structure_type: str):
     
 def create_project_folders(cluster_path: Path, owner: str, 
                           group: str, members: list):
-    
     owner = owner.strip().lower()
     group = group.strip()
     validate_dirname(cluster_path.name)

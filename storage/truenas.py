@@ -1,15 +1,18 @@
 import datetime
 import logging
 
+from django_q.tasks import Schedule, schedule
 from coldfront.core.resource.models import Resource
 from coldfront.core.allocation.models import Allocation
 from coldfront_utils import (bytes_to_units, 
                              update_allocation_attribute_value, 
                              validate_posix_path)
 from coldfront_utils.util.ad_search import ADSearch
-from .utils import update_allocation_attribute_value, get_client_config
+from .utils import (GroupNotFoundError, UIDNotFoundError, UserNotFoundError, 
+                    GIDNotFoundError, update_allocation_attribute_value, get_client_config)
 from .constants import (QUOTA_ATTRIBUTE_NAME, QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
-                        QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
+                        QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 
+                        SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
                         STORAGE_PLUGIN_STORAGE_UNITS)
 
 logger = logging.getLogger(__name__)
@@ -60,7 +63,7 @@ def get_quotas_batch(resource_id, client_config_id):
                 logger.error(f"Error getting quota info from TrueNAS for allocation {allocation} with path {storage_path}: {e}")
         else:
             logger.warning(f"Allocation {allocation} does not have a Storage Path attribute")
-
+    
 
 def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
     try:
@@ -80,22 +83,49 @@ def create_share(native_path: str, quota_bytes: int, owner: str, group: str, cli
             ad_search = ADSearch('', '')
             owner_results = ad_search.get_ad_user(owner)
             if not owner_results:
-                raise ValueError(f"Could not find owner {owner} in AD")
+                raise UserNotFoundError(f"Could not find owner {owner} in AD")
             uid = owner_results.get('uidNumber', None)
             if not uid:
-                raise ValueError(f"Could not find UID for owner {owner} in AD")
+                raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
             group_results = ad_search.get_ad_group(group)
             if not group_results:
-                raise ValueError(f"Could not find group {group} in AD")
+                raise GroupNotFoundError(f"Could not find group {group} in AD")
             gid = group_results.get('gidNumber', None)
             if not gid:
-                raise ValueError(f"Could not find GID for group {group} in AD")
+                raise GIDNotFoundError(f"Could not find GID for group {group} in AD")
             tc.create_project_share(truenas_path, quota_bytes, uid[0], gid[0], create_dataset=(not share_details['dataset_exists']),
                                     create_globus_share=(not share_details['globus_share_exists']),
                                     create_starfish_share=(not share_details['starfish_share_exists']),
                                     create_gateway_share=(not share_details['gateway_share_exists']))
             logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
+    except GroupNotFoundError as e:
+        logger.error(f"Group {group} not found in AD.: {e}")
+        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        raise e
+    except Exception as e:
+        logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
+        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        raise e
+
+
+def create_share_wait_for_group(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int, retries=5, wait=5):
+    try:
+        create_share(native_path, quota_bytes, owner, group, client_config_id, allocation_pk)
+    except GroupNotFoundError as e:
+        if retries <= 0:
+            logger.error(f"Exceeded maximum retries for group {group} not found in AD.")
+            update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+            raise e
+        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'waiting...')
+        logger.error(f"Group {group} not found in AD. Retrying after a delay: {e}")
+        schedule(create_share_wait_for_group,
+                 kwargs={
+                     'native_path': native_path, 'quota_bytes': quota_bytes, 'owner': owner, 'group': group,
+                     'client_config_id': client_config_id, 'allocation_pk': allocation_pk, 'retries': retries-1, 'wait': wait
+                 },
+                schedule_type=Schedule.ONCE,
+                next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait))
     except Exception as e:
         logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')

@@ -5,7 +5,7 @@ from coldfront.core.resource.models import Resource
 from coldfront.core.allocation.models import Allocation
 from coldfront_utils import ttl_cache, bytes_to_units, update_allocation_attribute_value, validate_posix_path
 from coldfront_utils.util.ad_search import ADSearch
-from storage.utils import get_client_config
+from storage.utils import GroupNotFoundError, get_client_config
 from storage.constants import (QUOTA_ATTRIBUTE_NAME, QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
                                QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
                                STORAGE_PLUGIN_STORAGE_UNITS)
@@ -147,7 +147,7 @@ def create_smb_share(native_path: str, quota_bytes: int, owner: str, group: str,
         ad_search = ADSearch("", "")
         group_info = ad_search.get_ad_group(group)
         if not group_info:
-            raise ValueError(f"Group {group} does not exist in Active Directory. Cannot create SMB share without a valid group.")
+            raise GroupNotFoundError(f"Group {group} does not exist in Active Directory. Cannot create SMB share without a valid group.")
         if native_path and quota_bytes:
             vast_path = native_path.strip() # remove any leading or trailing whitespace
             validate_posix_path(vast_path) # validate the path before using it to set the quota
@@ -241,4 +241,3 @@ def native_path_to_cluster_path(vast_path: str, client_config_id: str) -> str:
     vast_params = get_vast_params(client_config_id=client_config_id)
     cluster_path_template = vast_params.get("cluster_path_template")
     return cluster_path_template.format(directory_name=Path(vast_path).name.lstrip('/').lower())
-

@@ -158,3 +158,33 @@ def get_allocation_group(allocation):
         if pa.exists():
             group = pa.first().value
     return group
+
+
+class ActiveDirectoryNotFoundError(Exception):
+    def __init__(self, message="Active Directory entry not found"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class UserNotFoundError(ActiveDirectoryNotFoundError):
+    def __init__(self, message="User not found in Active Directory"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class UIDNotFoundError(ActiveDirectoryNotFoundError):
+    def __init__(self, message="UID not found in Active Directory"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class GroupNotFoundError(ActiveDirectoryNotFoundError):
+    def __init__(self, message="Group not found in Active Directory"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class GIDNotFoundError(ActiveDirectoryNotFoundError):
+    def __init__(self, message="GID not found in Active Directory"):
+        self.message = message
+        super().__init__(self.message)
