@@ -8,12 +8,11 @@ from .constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 class StorageAllocationRequestDetailsForm(forms.Form):
     """Form for specifying storage quota when completing a storage allocation request."""
 
-    quota_request = forms.FloatField(
+    quota_request = forms.DecimalField(
         label=QUOTA_ATTRIBUTE_NAME,
         required=True,
-        min_value=1,
-        widget=forms.NumberInput(attrs={'step': '1.0', 'min': '1.0', 'class': 'form-control'}),
-        help_text=f'Specify the storage quota in {STORAGE_PLUGIN_STORAGE_UNITS} for your allocation.',
+        widget=forms.NumberInput(attrs={'step': '0.1', 'min': '0.1', 'class': 'form-control'}),
+        help_text=f'Specify the storage quota in {STORAGE_PLUGIN_STORAGE_UNITS} for your allocation. (minimum 0.1)',
     )
 
 
