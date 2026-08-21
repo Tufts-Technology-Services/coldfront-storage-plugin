@@ -38,8 +38,7 @@ def create_project_share(native_path: str, quota_bytes: int, owner: str, group: 
     try:
         create_project_share_file_structure(native_path=native_path, 
                                             owner=owner, group=group, 
-                                            client_config_id=client_config_id, 
-                                            allocation_pk=allocation_pk)
+                                            client_config_id=client_config_id)
     except GroupNotFoundError as e:
         if retries <= 0:
             logger.error(f"Group {group} not found in AD and no retries left")
