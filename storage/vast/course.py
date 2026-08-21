@@ -47,8 +47,9 @@ def create_course_share(native_path: str, quota_bytes: int, owner: str, group: s
         if not uid:
             raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
         group_results = ad_search.get_ad_group(group)
-        if not group_results:
-            raise GroupNotFoundError(f"Could not find group {group} in AD")
+        if not group_results or group_results.get('gidNumber', []) == []:
+            raise GroupNotFoundError(f"Could not find group with GID '{group}' in AD")
+        
         cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
         create_course_folders(cluster_path=cluster_path,
                               owner=owner,
