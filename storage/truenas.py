@@ -119,7 +119,7 @@ def create_share_wait_for_group(native_path: str, quota_bytes: int, owner: str, 
             raise e
         update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'waiting...')
         logger.error(f"Group {group} not found in AD. Retrying after a delay: {e}")
-        schedule(create_share_wait_for_group,
+        schedule('storage.truenas.create_share_wait_for_group',
                  kwargs={
                      'native_path': native_path, 'quota_bytes': quota_bytes, 'owner': owner, 'group': group,
                      'client_config_id': client_config_id, 'allocation_pk': allocation_pk, 'retries': retries-1, 'wait': wait
