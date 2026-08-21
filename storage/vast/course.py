@@ -63,12 +63,10 @@ def create_course_share(native_path: str, quota_bytes: int, owner: str, group: s
             raise e
         else:
             update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'waiting...')
-            schedule('storage.vast.create_course_share', kwargs={
-                    'native_path': native_path, 'quota_bytes': quota_bytes, 'owner': owner, 'group': group, 
-                    'client_config_id': client_config_id, 'allocation_pk': allocation_pk, 'retries': retries-1, 'wait': wait 
-                    },
-                    schedule_type=Schedule.ONCE,
-                    next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
+            schedule('storage.vast.create_course_share', native_path, quota_bytes, owner, group, 
+                      client_config_id, allocation_pk, retries-1, wait,
+                      schedule_type=Schedule.ONCE,
+                      next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
             )
     except Exception as e:
         logger.error(f"Error creating course share for path {cluster_path}: {e}")

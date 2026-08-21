@@ -37,9 +37,8 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
         if retries <= 0:
             raise GroupNotFoundError(f"Could not find group with GID '{group}' in AD")
         else:
-            schedule('storage.directory_structure.tasks.create_folders', kwargs={
-                    'allocation_pk': allocation_pk, 'structure_type': structure_type, 'retries': retries-1, 'wait': wait
-                    },
+            schedule('storage.directory_structure.tasks.create_folders',
+                    allocation_pk, structure_type, retries-1, wait,
                     schedule_type=Schedule.ONCE,
                     next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
             )
