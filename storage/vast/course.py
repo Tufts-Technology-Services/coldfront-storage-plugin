@@ -1,22 +1,32 @@
-import logging
 import datetime
+import logging
 from pathlib import Path
-
-from django_q.tasks import Schedule, schedule
 
 from coldfront.core.allocation.models import Allocation
 from coldfront_utils import update_allocation_attribute_value
-
-from storage.utils import GroupNotFoundError, UIDNotFoundError, UserNotFoundError
 from coldfront_utils.util.ad_search import ADSearch
-from .vast import create_share, native_path_to_cluster_path
+from django_q.tasks import Schedule, schedule
+
 from storage.constants import SHARE_CREATION_STATE_ATTRIBUTE_NAME
 from storage.directory_structure.tasks import create_course_folders
+from storage.utils import GroupNotFoundError, UIDNotFoundError, UserNotFoundError
+from storage.vast.errors import VastViewNotFoundError
+
+from .vast import check_folder, create_share, native_path_to_cluster_path
 
 logger = logging.getLogger(__name__)
 
-def create_course_share(native_path: str, quota_bytes: int, owner: str, group: str, 
-                        client_config_id: str, allocation_pk: int, retries=5, wait=5):
+
+def create_course_share(
+    native_path: str,
+    quota_bytes: int,
+    owner: str,
+    group: str,
+    client_config_id: str,
+    allocation_pk: int,
+    retries=5,
+    wait=5,
+):
     """
     Create a course share in the VAST storage system.
 
@@ -30,45 +40,57 @@ def create_course_share(native_path: str, quota_bytes: int, owner: str, group: s
         retries (int, optional): The number of retries if the group is not found in AD. Defaults to 5.
         wait (int, optional): The wait time between retries in minutes. Defaults to 5.
     """
-    create_share(native_path=native_path.lower(), quota_bytes=quota_bytes, 
-                 owner=owner, group=group, client_config_id=client_config_id, 
-                 allocation_pk=allocation_pk)
-
+    create_share(
+        native_path=native_path.lower(),
+        quota_bytes=quota_bytes,
+        owner=owner,
+        group=group,
+        client_config_id=client_config_id,
+        allocation_pk=allocation_pk,
+    )
 
     allocation = Allocation.objects.get(id=allocation_pk)
-    update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'pending')
+    update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "pending")
 
     try:
-        ad_search = ADSearch('', '')
+        ad_search = ADSearch("", "")
         owner_results = ad_search.get_ad_user(owner)
         if not owner_results:
             raise UserNotFoundError(f"Could not find owner {owner} in AD")
-        uid = owner_results.get('uidNumber', None)
+        uid = owner_results.get("uidNumber", None)
         if not uid:
             raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
         group_results = ad_search.get_ad_group(group)
-        if not group_results or group_results.get('gidNumber', []) == []:
+        if not group_results or group_results.get("gidNumber", []) == []:
             raise GroupNotFoundError(f"Could not find group with GID '{group}' in AD")
-        
+        check_folder(native_path, client_config_id=client_config_id)
         cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
-        create_course_folders(cluster_path=cluster_path,
-                              owner=owner,
-                              group=group,
-                              members=[])
+        create_course_folders(cluster_path=cluster_path, owner=owner, group=group, members=[])
 
-    except GroupNotFoundError as e:
+    except (GroupNotFoundError, VastViewNotFoundError) as e:
         if retries <= 0:
-            logger.error(f"Group {group} not found in AD and no retries left")
-            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+            if isinstance(e, VastViewNotFoundError):
+                logger.error(f"VAST view not found for path {native_path} and no retries left")
+            elif isinstance(e, GroupNotFoundError):
+                logger.error(f"Group {group} not found in AD and no retries left")
+            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed")
             raise e
         else:
-            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'waiting...')
-            schedule('storage.vast.create_course_share', native_path, quota_bytes, owner, group, 
-                      client_config_id, allocation_pk, retries-1, wait,
-                      schedule_type=Schedule.ONCE,
-                      next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
+            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "waiting...")
+            schedule(
+                "storage.vast.create_course_share",
+                native_path,
+                quota_bytes,
+                owner,
+                group,
+                client_config_id,
+                allocation_pk,
+                retries - 1,
+                wait,
+                schedule_type=Schedule.ONCE,
+                next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
             )
     except Exception as e:
         logger.error(f"Error creating course share for path {cluster_path}: {e}")
-        update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
-        raise e 
+        update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed")
+        raise e

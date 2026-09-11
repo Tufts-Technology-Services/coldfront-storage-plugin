@@ -1,18 +1,17 @@
 import datetime
-from pathlib import Path
 import logging
-
-from django_q.tasks import schedule, Schedule
+from pathlib import Path
 
 from coldfront.core.allocation.models import Allocation
 from coldfront_utils.util.ad_search import ADSearch
+from django_q.tasks import Schedule, schedule
+
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME
+from storage.directory_structure import PosixDeploymentRunner
 from storage.directory_structure.course import deploy_course_directory
 from storage.directory_structure.hpc_projects import deploy_project_directory
-from storage.utils import GroupNotFoundError, validate_dirname
-from storage.directory_structure import PosixDeploymentRunner
-from storage.utils import get_allocation_group
-
+from storage.directory_structure.scratch import deploy_personal_scratch_directory
+from storage.utils import GroupNotFoundError, get_allocation_group, validate_dirname
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +29,21 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
     else:
         logger.error(f"No cluster path found for allocation {allocation_pk}")
         raise ValueError(f"No cluster path found for allocation {allocation_pk}")
-    members = allocation.allocationuser_set.filter(status__name='Active').values_list('user__username', flat=True)
-    ad_search = ADSearch('', '')
+    members = allocation.allocationuser_set.filter(status__name="Active").values_list("user__username", flat=True)
+    ad_search = ADSearch("", "")
     group_results = ad_search.get_ad_group(group)
-    if not group_results or group_results.get('gidNumber', []) == []:
+    if not group_results or group_results.get("gidNumber", []) == []:
         if retries <= 0:
             raise GroupNotFoundError(f"Could not find group with GID '{group}' in AD")
         else:
-            schedule('storage.directory_structure.tasks.create_folders',
-                    allocation_pk, structure_type, retries-1, wait,
-                    schedule_type=Schedule.ONCE,
-                    next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait)
+            schedule(
+                "storage.directory_structure.tasks.create_folders",
+                allocation_pk,
+                structure_type,
+                retries - 1,
+                wait,
+                schedule_type=Schedule.ONCE,
+                next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
             )
             return
     if structure_type == "hpc_project":
@@ -51,34 +54,43 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
         logger.error(f"Unknown structure type {structure_type}. Cannot create folders.")
         raise ValueError(f"Unknown structure type {structure_type}. Cannot create folders.")
 
-    
-def create_project_folders(cluster_path: Path, owner: str, 
-                          group: str, members: list):
+
+def create_project_folders(cluster_path: Path, owner: str, group: str, members: list):
     owner = owner.strip().lower()
     group = group.strip()
     validate_dirname(cluster_path.name)
     runner = PosixDeploymentRunner()
-    runner.add_deployment(deploy_project_directory, 
-                        parent_directory=cluster_path.parent, 
-                        project_directory=cluster_path.name, 
-                        project_members=members,
-                        owner=owner, 
-                        group=group)
+    runner.add_deployment(
+        deploy_project_directory,
+        parent_directory=cluster_path.parent,
+        project_directory=cluster_path.name,
+        project_members=members,
+        owner=owner,
+        group=group,
+    )
     runner.run()
 
 
-def create_course_folders(cluster_path: Path, owner: str, 
-                          group: str, members: list):
+def create_scratch_folders(parent_path: Path, owner: str):
+    owner = owner.strip().lower()
+    runner = PosixDeploymentRunner()
+    runner.add_deployment(deploy_personal_scratch_directory, parent_directory=parent_path, username=owner)
+    runner.run()
+
+
+def create_course_folders(cluster_path: Path, owner: str, group: str, members: list):
     owner = owner.strip().lower()
     group = group.strip()
-    admin_group = f'{group}admin'
+    admin_group = f"{group}admin"
     validate_dirname(cluster_path.name)
     runner = PosixDeploymentRunner()
-    runner.add_deployment(deploy_course_directory, 
-                        parent_directory=cluster_path.parent, 
-                        course_directory=cluster_path.name, 
-                        course_members=members,
-                        owner=owner, 
-                        group=group, 
-                        admin_group=admin_group)
+    runner.add_deployment(
+        deploy_course_directory,
+        parent_directory=cluster_path.parent,
+        course_directory=cluster_path.name,
+        course_members=members,
+        owner=owner,
+        group=group,
+        admin_group=admin_group,
+    )
     runner.run()
