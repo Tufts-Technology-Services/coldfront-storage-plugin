@@ -1,19 +1,28 @@
 import datetime
 import logging
 
-from django_q.tasks import Schedule, schedule
-from coldfront.core.resource.models import Resource
 from coldfront.core.allocation.models import Allocation
-from coldfront_utils import (bytes_to_units, 
-                             update_allocation_attribute_value, 
-                             validate_posix_path)
+from coldfront.core.resource.models import Resource
+from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
 from coldfront_utils.util.ad_search import ADSearch
-from .utils import (GroupNotFoundError, UIDNotFoundError, UserNotFoundError, 
-                    GIDNotFoundError, update_allocation_attribute_value, get_client_config)
-from .constants import (QUOTA_ATTRIBUTE_NAME, QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
-                        QUOTA_REPORT_DATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 
-                        SHARE_CREATION_STATE_ATTRIBUTE_NAME, 
-                        STORAGE_PLUGIN_STORAGE_UNITS)
+from django_q.tasks import Schedule, schedule
+
+from .constants import (
+    QUOTA_ATTRIBUTE_NAME,
+    QUOTA_IN_BYTES_ATTRIBUTE_NAME,
+    QUOTA_REPORT_DATE_ATTRIBUTE_NAME,
+    QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
+    SHARE_CREATION_STATE_ATTRIBUTE_NAME,
+    STORAGE_PLUGIN_STORAGE_UNITS,
+)
+from .utils import (
+    GIDNotFoundError,
+    GroupNotFoundError,
+    UIDNotFoundError,
+    UserNotFoundError,
+    get_client_config,
+    update_allocation_attribute_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +31,19 @@ def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocat
     try:
         allocation = Allocation.objects.get(id=allocation_pk)
         tc = get_truenas_client(client_config_id)
-        truenas_path = native_path.strip() # remove any leading or trailing whitespace
-        validate_posix_path(truenas_path) # validate the path before using it to set the quota
+        truenas_path = native_path.strip()  # remove any leading or trailing whitespace
+        validate_posix_path(truenas_path)  # validate the path before using it to set the quota
         share_details = tc.get_dataset_info(truenas_path, details=True)
         if not share_details:
             raise ValueError(f"Dataset {truenas_path} does not exist. Please create it first.")
         # truenas path looks like f"/mnt/{conf['parent_dataset']}/{project_name}"
         logger.info(f"Setting quota for path {truenas_path} to {quota_bytes / 10**12} TB")
         tc.update_quota(truenas_path, quota_bytes)
-        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'success')
+        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, "success")
     except Exception as e:
         logger.error(f"Error setting quota for path {native_path} in TrueNAS: {e}")
-        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, 'failed')
+        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, "failed")
         raise e
-
 
 
 def get_quotas_batch(resource_id, client_config_id):
@@ -46,99 +54,154 @@ def get_quotas_batch(resource_id, client_config_id):
     allocations = resource.allocation_set.distinct()
     # get allocation info from TrueNAS API and update allocation attributes in coldfront
     for allocation in allocations:
-        storage_path_attr = allocation.allocationattribute_set.filter(allocation_attribute_type__name='truenas_path').first()
+        storage_path_attr = allocation.allocationattribute_set.filter(
+            allocation_attribute_type__name="truenas_path"
+        ).first()
         if storage_path_attr:
             storage_path = storage_path_attr.value
             try:
-                r = [q for q in all_quotas if q['mountpoint'] == storage_path]
-                current_quota = r[0]['quota']
-                report_date = datetime.datetime.now() # TrueNAS API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
-                update_allocation_attribute_value(allocation, 
-                                                  QUOTA_IN_BYTES_ATTRIBUTE_NAME, 
-                                                  current_quota)
-                update_allocation_attribute_value(allocation, QUOTA_ATTRIBUTE_NAME, str(round(bytes_to_units(current_quota, STORAGE_PLUGIN_STORAGE_UNITS), 2))) 
+                r = [q for q in all_quotas if q["mountpoint"] == storage_path]
+                current_quota = r[0]["quota"]
+                report_date = datetime.datetime.now()  # TrueNAS API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
+                update_allocation_attribute_value(allocation, QUOTA_IN_BYTES_ATTRIBUTE_NAME, current_quota)
+                update_allocation_attribute_value(
+                    allocation,
+                    QUOTA_ATTRIBUTE_NAME,
+                    str(round(bytes_to_units(current_quota, STORAGE_PLUGIN_STORAGE_UNITS), 2)),
+                )
                 update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
 
             except Exception as e:
-                logger.error(f"Error getting quota info from TrueNAS for allocation {allocation} with path {storage_path}: {e}")
+                logger.error(
+                    f"Error getting quota info from TrueNAS for allocation {allocation} with path {storage_path}: {e}"
+                )
         else:
             logger.warning(f"Allocation {allocation} does not have a Storage Path attribute")
-    
 
-def create_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int) -> None:
+
+def create_share(
+    native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int
+) -> None:
     try:
-        truenas_path = native_path.strip() # remove any leading or trailing whitespace
-        validate_posix_path(truenas_path) # validate the path before using it to set the quota
-        
+        truenas_path = native_path.strip()  # remove any leading or trailing whitespace
+        validate_posix_path(truenas_path)  # validate the path before using it to set the quota
+
         tc = get_truenas_client(client_config_id)
         # check if share exists
         logger.debug("checking share details...")
         share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
         # based on share details, request share creation
-        if share_details['dataset_exists'] and share_details['quota_matches'] and share_details['starfish_share_exists'] and share_details['globus_share_exists']:
+        if (
+            share_details["dataset_exists"]
+            and share_details["quota_matches"]
+            and share_details["starfish_share_exists"]
+            and share_details["globus_share_exists"]
+        ):
             logger.info(f"Share {truenas_path} already exists with quota {quota_bytes / 10**12} TB. No action needed.")
         else:
-            logger.info(f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB...")
+            logger.info(
+                f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB..."
+            )
             # get uid, gid, and quota for this allocation
-            ad_search = ADSearch('', '')
+            ad_search = ADSearch("", "")
             owner_results = ad_search.get_ad_user(owner)
             if not owner_results:
                 raise UserNotFoundError(f"Could not find owner {owner} in AD")
-            uid = owner_results.get('uidNumber', None)
+            uid = owner_results.get("uidNumber", None)
             if not uid:
                 raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
             group_results = ad_search.get_ad_group(group)
             if not group_results:
                 raise GroupNotFoundError(f"Could not find group {group} in AD")
-            gid = group_results.get('gidNumber', None)
+            gid = group_results.get("gidNumber", None)
             if not gid:
                 raise GIDNotFoundError(f"Could not find GID for group {group} in AD")
-            tc.create_project_share(truenas_path, quota_bytes, uid[0], gid[0], create_dataset=(not share_details['dataset_exists']),
-                                    create_globus_share=(not share_details['globus_share_exists']),
-                                    create_starfish_share=(not share_details['starfish_share_exists']),
-                                    create_gateway_share=(not share_details['gateway_share_exists']))
+            tc.create_project_share(
+                truenas_path,
+                quota_bytes,
+                uid[0],
+                gid[0],
+                create_dataset=(not share_details["dataset_exists"]),
+                create_globus_share=(not share_details["globus_share_exists"]),
+                create_starfish_share=(not share_details["starfish_share_exists"]),
+                create_gateway_share=(not share_details["gateway_share_exists"]),
+            )
             logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
-        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'success')
+        update_allocation_attribute_value(
+            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "success"
+        )
     except GroupNotFoundError as e:
         logger.error(f"Group {group} not found in AD.: {e}")
-        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        update_allocation_attribute_value(
+            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
+        )
         raise e
     except Exception as e:
         logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
-        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        update_allocation_attribute_value(
+            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
+        )
         raise e
 
 
-def create_share_wait_for_group(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int, retries=5, wait=5):
+def create_share_wait_for_group(
+    native_path: str,
+    quota_bytes: int,
+    owner: str,
+    group: str,
+    client_config_id: str,
+    allocation_pk: int,
+    retries=5,
+    wait=5,
+):
     try:
         create_share(native_path, quota_bytes, owner, group, client_config_id, allocation_pk)
-    except GroupNotFoundError as e:
+    except (GroupNotFoundError, GIDNotFoundError) as e:
         if retries <= 0:
             logger.error(f"Exceeded maximum retries for group {group} not found in AD.")
-            update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+            update_allocation_attribute_value(
+                Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
+            )
             raise e
-        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'waiting...')
+        update_allocation_attribute_value(
+            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "waiting..."
+        )
         logger.error(f"Group {group} not found in AD. Retrying after a delay: {e}")
-        schedule('storage.truenas.create_share_wait_for_group',
-                 kwargs={
-                     'native_path': native_path, 'quota_bytes': quota_bytes, 'owner': owner, 'group': group,
-                     'client_config_id': client_config_id, 'allocation_pk': allocation_pk, 'retries': retries-1, 'wait': wait
-                 },
-                schedule_type=Schedule.ONCE,
-                next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait))
+        schedule(
+            "storage.truenas.create_share_wait_for_group",
+            kwargs={
+                "native_path": native_path,
+                "quota_bytes": quota_bytes,
+                "owner": owner,
+                "group": group,
+                "client_config_id": client_config_id,
+                "allocation_pk": allocation_pk,
+                "retries": retries - 1,
+                "wait": wait,
+            },
+            schedule_type=Schedule.ONCE,
+            next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
+        )
         return
     except Exception as e:
         logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
-        update_allocation_attribute_value(Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, 'failed')
+        update_allocation_attribute_value(
+            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
+        )
         raise e
 
 
 def get_truenas_client(client_config_id):
     client_config = get_client_config(client_config_id)
-    from truenas_utils import TrueNASClient 
-    cl = TrueNASClient(client_config['api_key'], client_config['host'], client_config['parent_dataset'],
-                        verify_ssl=client_config['verify_certs'])
-    cl.starfish_hosts = client_config.get('starfish_hosts', [])
-    cl.globus_hosts = client_config.get('globus_hosts', [])
-    cl.gateway_hosts = client_config.get('gateway_hosts', [])
+    from truenas_utils import TrueNASClient
+
+    cl = TrueNASClient(
+        client_config["api_key"],
+        client_config["host"],
+        client_config["parent_dataset"],
+        verify_ssl=client_config["verify_certs"],
+    )
+    cl.starfish_hosts = client_config.get("starfish_hosts", [])
+    cl.globus_hosts = client_config.get("globus_hosts", [])
+    cl.gateway_hosts = client_config.get("gateway_hosts", [])
     return cl
