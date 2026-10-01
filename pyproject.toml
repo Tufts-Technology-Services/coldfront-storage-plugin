@@ -35,11 +35,11 @@ starfish = [
 ]
 
 vast = [
-    "vast_api_client@https://github.com/Tufts-Technology-Services/vast-api-client.git",
+    "vast_api_client@git+https://github.com/Tufts-Technology-Services/vast-api-client.git",
 ]
 
 truenas = [
-    "truenas_utils@https://github.com/Tufts-Technology-Services/truenas-utils.git",
+    "truenas_utils@git+https://github.com/Tufts-Technology-Services/truenas-utils.git",
 ]
 
 pyinfra = [
