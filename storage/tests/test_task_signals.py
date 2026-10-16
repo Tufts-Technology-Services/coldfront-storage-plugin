@@ -19,6 +19,7 @@ from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,
     QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
+    SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
     ProvisionStatus,
 )
 from storage.utils import (
@@ -283,11 +284,12 @@ def test_the_channels_do_not_cross(allocation):
 def dispatchable(storage_resource, make_allocation, state_attribute_types):
     """An allocation with what the dispatch tasks read, and a handler with both tasks configured."""
     allocation = make_allocation(storage_resource, attributes={QUOTA_ATTRIBUTE_NAME: "10", "vast_path": "/projects/p"})
+    # different clients for the two jobs, so a test can tell which one a task was handed
     handler = SimpleNamespace(
         create_share_task="storage.vast.create_share",
-        create_client_id="hpc",
+        create_client_id="share-client",
         set_quota_task="storage.vast.set_quota",
-        quota_client_id="hpc",
+        quota_client_id="quota-client",
     )
     with (
         patch("storage.tasks.get_storage_handler", return_value=handler),
@@ -295,6 +297,23 @@ def dispatchable(storage_resource, make_allocation, state_attribute_types):
         patch("storage.tasks.get_allocation_group", return_value="g"),
     ):
         yield allocation
+
+
+@patch("storage.tasks.STORAGE_LOG_ONLY", False)  # it defaults to on, which returns before queueing
+def test_create_share_hands_the_share_task_the_share_client(dispatchable):
+    """Not the quota client: the share is created through the client its handler names for creation."""
+    AllocationAttributeType.objects.get_or_create(
+        name=SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
+        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
+    )
+
+    with patch("storage.tasks.async_task", return_value="task-1") as queued:
+        tasks.create_share(dispatchable.pk)
+
+    task, native_path, quota_bytes, owner, group, client_id, allocation_pk = queued.call_args.args
+    assert task == "storage.vast.create_share"
+    assert client_id == "share-client"
+    assert allocation_pk == dispatchable.pk
 
 
 @patch("storage.tasks.STORAGE_LOG_ONLY", True)

@@ -180,7 +180,7 @@ def create_share(allocation_pk: int):
                 quota_bytes,
                 owner,
                 group,
-                storage_handler.quota_client_id,
+                storage_handler.create_client_id,
                 allocation_pk,
             )
             update_allocation_attribute_value(allocation, SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, task_id)
