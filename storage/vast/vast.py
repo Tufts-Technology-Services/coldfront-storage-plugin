@@ -5,7 +5,6 @@ from pathlib import Path
 import requests
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, ttl_cache, update_allocation_attribute_value, validate_posix_path
-from coldfront_utils.util.ad_search import ADSearch
 
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,
@@ -14,10 +13,13 @@ from storage.constants import (
     STORAGE_PLUGIN_STORAGE_UNITS,
 )
 from storage.utils import (
-    GroupNotFoundError,
+    ActiveDirectoryNotFoundError,
+    TaskRetryScheduled,
     get_client_config,
+    lookup_ad_entries,
     records_quota_update_state,
     records_share_creation_state,
+    schedule_retry,
 )
 from storage.vast.errors import VastViewNotFoundError
 
@@ -174,10 +176,36 @@ def add_quota_and_protected_path(vc, params: dict, vast_path: Path, quota_bytes:
 
 @records_share_creation_state
 def create_smb_share(
-    native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int
+    native_path: str,
+    quota_bytes: int,
+    owner: str,
+    group: str,
+    client_config_id: str,
+    allocation_pk: int,
+    retries=5,
+    wait=5,
 ) -> None:
-    """Task entry point: provision an SMB share. The decorator records the outcome."""
-    provision_smb_share(native_path, quota_bytes, group, client_config_id)
+    """Task entry point: provision an SMB share. The decorator records the outcome.
+
+    Waits for the group to reach AD, as the NFS share tasks do: it is retried every `wait` minutes,
+    up to `retries` times, while the group or its GID isn't there yet.
+    """
+    try:
+        provision_smb_share(native_path, quota_bytes, group, client_config_id)
+    except ActiveDirectoryNotFoundError as e:
+        schedule_retry(
+            create_smb_share,
+            e,
+            retries=retries,
+            wait=wait,
+            native_path=native_path,
+            quota_bytes=quota_bytes,
+            owner=owner,
+            group=group,
+            client_config_id=client_config_id,
+            allocation_pk=allocation_pk,
+        )
+        raise TaskRetryScheduled(str(e)) from e
 
 
 def provision_smb_share(native_path: str, quota_bytes: int, group: str, client_config_id: str) -> None:
@@ -187,12 +215,7 @@ def provision_smb_share(native_path: str, quota_bytes: int, group: str, client_c
     """
     vc = get_vast_client(client_config_id)
     params = get_vast_params(client_config_id)
-    ad_search = ADSearch("", "")
-    group_info = ad_search.get_ad_group(group)
-    if not group_info:
-        raise GroupNotFoundError(
-            f"Group {group} does not exist in Active Directory. Cannot create SMB share without a valid group."
-        )
+    _, group_info = lookup_ad_entries(group=group)
     if not native_path or not quota_bytes:
         raise ValueError(
             "Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes."

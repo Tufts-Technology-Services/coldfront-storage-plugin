@@ -2,7 +2,7 @@ import functools
 import inspect
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
 from coldfront.core.project.models import ProjectAttribute
@@ -14,7 +14,9 @@ from coldfront_utils.signals import (
     share_creation_failed,
     share_creation_successful,
 )
+from coldfront_utils.util.ad_search import ADSearch
 from django.conf import settings
+from django_q.tasks import Schedule, schedule
 
 from .constants import (
     GROUP_ATTRIBUTE_NAME,
@@ -354,3 +356,51 @@ class GIDNotFoundError(ActiveDirectoryNotFoundError):
     def __init__(self, message="GID not found in Active Directory"):
         self.message = message
         super().__init__(self.message)
+
+
+def lookup_ad_entries(owner=None, group=None):
+    """Look up a user and/or a group in AD, checking each has its POSIX id yet.
+
+    Returns (user entry, group entry) as ADSearch returns them, with None for one not asked for.
+    Raises UserNotFoundError or UIDNotFoundError for the user, GroupNotFoundError or GIDNotFoundError
+    for the group. All four are ActiveDirectoryNotFoundError: AD can lag behind Grouper and account
+    creation, so a task that catches that can retry with schedule_retry().
+    """
+    ad_search = ADSearch("", "")
+    user_entry = group_entry = None
+    if owner is not None:
+        user_entry = ad_search.get_ad_user(owner)
+        if not user_entry:
+            raise UserNotFoundError(f"Could not find user {owner} in AD")
+        if not user_entry.get("uidNumber"):
+            raise UIDNotFoundError(f"User {owner} is in AD but has no UID yet")
+    if group is not None:
+        group_entry = ad_search.get_ad_group(group)
+        if not group_entry:
+            raise GroupNotFoundError(f"Could not find group {group} in AD")
+        if not group_entry.get("gidNumber"):
+            raise GIDNotFoundError(f"Group {group} is in AD but has no GID yet")
+    return user_entry, group_entry
+
+
+def schedule_retry(task, error, *, retries, wait, **task_kwargs) -> None:
+    """Schedule `task` to run again in `wait` minutes with one retry fewer, or re-raise `error`.
+
+    `task_kwargs` are the task's own arguments, passed by keyword so their order can't go wrong;
+    `retries` and `wait` are passed on for the next run. With no retries left, `error` is re-raised
+    so the task fails with it. A decorated task then raises TaskRetryScheduled, so its state is
+    recorded as scheduled rather than failed.
+    """
+    task_path = f"{task.__module__}.{task.__qualname__}"
+    if retries <= 0:
+        logger.error(f"{task_path} has no retries left: {error}")
+        raise error
+    logger.warning(f"{task_path} will run again in {wait} minutes ({retries - 1} retries left after that): {error}")
+    schedule(
+        task_path,
+        **task_kwargs,
+        retries=retries - 1,
+        wait=wait,
+        schedule_type=Schedule.ONCE,
+        next_run=datetime.now(timezone.utc) + timedelta(minutes=wait),
+    )

@@ -161,7 +161,7 @@ is readable from the Django Q task list and not only from the allocation:
 
 ```python
 {"message": "successful:"}
-{"message": "scheduled:Could not find group with GID 'g' in AD"}
+{"message": "scheduled:Group g is in AD but has no GID yet"}
 ```
 
 If the task body returns a dict of its own, its keys are carried through alongside `message`; any
@@ -222,6 +222,20 @@ Two rules follow, and the tests enforce both:
 
 The attribute types these tasks write (task id, state and message) are created by migration
 `storage.0003_create_task_attribute_types`, so a deployment does not need them set up in advance.
+
+### Waiting for Active Directory
+
+A new allocation's group, and sometimes its owner, can reach AD after the storage tasks first run,
+so every task that needs them waits: the project, course and SMB share tasks on VAST,
+`create_share_wait_for_group` on TrueNAS, and folder creation. They look the owner and group up with
+`lookup_ad_entries()` in `storage/utils.py`, which raises `UserNotFoundError`, `UIDNotFoundError`,
+`GroupNotFoundError` or `GIDNotFoundError`, each with its own message, all subclasses of
+`ActiveDirectoryNotFoundError`. A task catches that base class (and `VastViewNotFoundError`, on VAST)
+and calls `schedule_retry()`, which schedules the task to run again in `wait` minutes with one retry
+fewer, passing its arguments by keyword, or re-raises the error once `retries` reaches 0. A decorated
+task then raises `TaskRetryScheduled`, so its state is `scheduled` until it runs again; folder
+creation, which records no state, just returns. A username that never reaches AD is therefore
+retried until its retries run out (five, five minutes apart, by default) before the task fails.
 
 ## Running the tests
 

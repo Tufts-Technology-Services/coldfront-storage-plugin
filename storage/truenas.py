@@ -3,8 +3,6 @@ import logging
 
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
-from coldfront_utils.util.ad_search import ADSearch
-from django_q.tasks import Schedule, schedule
 
 from .constants import (
     QUOTA_ATTRIBUTE_NAME,
@@ -13,14 +11,13 @@ from .constants import (
     STORAGE_PLUGIN_STORAGE_UNITS,
 )
 from .utils import (
-    GIDNotFoundError,
-    GroupNotFoundError,
+    ActiveDirectoryNotFoundError,
     TaskRetryScheduled,
-    UIDNotFoundError,
-    UserNotFoundError,
     get_client_config,
+    lookup_ad_entries,
     records_quota_update_state,
     records_share_creation_state,
+    schedule_retry,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,25 +102,13 @@ def provision_share(native_path: str, quota_bytes: int, owner: str, group: str, 
         return
 
     logger.info(f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB...")
-    # get uid, gid, and quota for this allocation
-    ad_search = ADSearch("", "")
-    owner_results = ad_search.get_ad_user(owner)
-    if not owner_results:
-        raise UserNotFoundError(f"Could not find owner {owner} in AD")
-    uid = owner_results.get("uidNumber", None)
-    if not uid:
-        raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
-    group_results = ad_search.get_ad_group(group)
-    if not group_results:
-        raise GroupNotFoundError(f"Could not find group {group} in AD")
-    gid = group_results.get("gidNumber", None)
-    if not gid:
-        raise GIDNotFoundError(f"Could not find GID for group {group} in AD")
+    # the owner's uid and the group's gid for the dataset
+    user_entry, group_entry = lookup_ad_entries(owner, group)
     tc.create_project_share(
         truenas_path,
         quota_bytes,
-        uid[0],
-        gid[0],
+        user_entry["uidNumber"][0],
+        group_entry["gidNumber"][0],
         create_dataset=(not share_details["dataset_exists"]),
         create_globus_share=(not share_details["globus_share_exists"]),
         create_starfish_share=(not share_details["starfish_share_exists"]),
@@ -146,25 +131,18 @@ def create_share_wait_for_group(
     try:
         # the action, not the create_share task: nesting the tasks would nest their state handling
         provision_share(native_path, quota_bytes, owner, group, client_config_id)
-    except (GroupNotFoundError, GIDNotFoundError) as e:
-        if retries <= 0:
-            logger.error(f"Exceeded maximum retries for group {group} not found in AD.")
-            raise
-        logger.error(f"Group {group} not found in AD. Retrying after a delay: {e}")
-        schedule(
-            "storage.truenas.create_share_wait_for_group",
-            kwargs={
-                "native_path": native_path,
-                "quota_bytes": quota_bytes,
-                "owner": owner,
-                "group": group,
-                "client_config_id": client_config_id,
-                "allocation_pk": allocation_pk,
-                "retries": retries - 1,
-                "wait": wait,
-            },
-            schedule_type=Schedule.ONCE,
-            next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
+    except ActiveDirectoryNotFoundError as e:
+        schedule_retry(
+            create_share_wait_for_group,
+            e,
+            retries=retries,
+            wait=wait,
+            native_path=native_path,
+            quota_bytes=quota_bytes,
+            owner=owner,
+            group=group,
+            client_config_id=client_config_id,
+            allocation_pk=allocation_pk,
         )
         raise TaskRetryScheduled(str(e)) from e
 

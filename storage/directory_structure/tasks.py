@@ -1,17 +1,20 @@
-import datetime
 import logging
 from pathlib import Path
 
 from coldfront.core.allocation.models import Allocation
-from coldfront_utils.util.ad_search import ADSearch
-from django_q.tasks import Schedule, schedule
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME
 from storage.directory_structure import PosixDeploymentRunner
 from storage.directory_structure.course import deploy_course_directory
 from storage.directory_structure.hpc_projects import deploy_project_directory
 from storage.directory_structure.scratch import deploy_personal_scratch_directory
-from storage.utils import GroupNotFoundError, get_allocation_group, validate_dirname
+from storage.utils import (
+    ActiveDirectoryNotFoundError,
+    get_allocation_group,
+    lookup_ad_entries,
+    schedule_retry,
+    validate_dirname,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +33,14 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
         logger.error(f"No cluster path found for allocation {allocation_pk}")
         raise ValueError(f"No cluster path found for allocation {allocation_pk}")
     members = allocation.allocationuser_set.filter(status__name="Active").values_list("user__username", flat=True)
-    ad_search = ADSearch("", "")
-    group_results = ad_search.get_ad_group(group)
-    if not group_results or group_results.get("gidNumber", []) == []:
-        if retries <= 0:
-            raise GroupNotFoundError(f"Could not find group with GID '{group}' in AD")
-        else:
-            schedule(
-                "storage.directory_structure.tasks.create_folders",
-                allocation_pk,
-                structure_type,
-                retries - 1,
-                wait,
-                schedule_type=Schedule.ONCE,
-                next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
-            )
-            return
+    try:
+        lookup_ad_entries(group=group)
+    except ActiveDirectoryNotFoundError as e:
+        # not a decorated task, so there's no state to record: schedule the retry and stop here
+        schedule_retry(
+            create_folders, e, retries=retries, wait=wait, allocation_pk=allocation_pk, structure_type=structure_type
+        )
+        return
     if structure_type == "hpc_project":
         create_project_folders(cluster_path, owner, group, list(members))
     elif structure_type == "hpc_course":

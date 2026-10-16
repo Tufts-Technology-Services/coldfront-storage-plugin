@@ -20,8 +20,8 @@ from storage.vast import course, project, vast
 
 @pytest.fixture
 def fake_ad_search():
-    """Stand in for AD in the course share task. Yields the ADSearch instance it will get back."""
-    with patch("storage.vast.course.ADSearch") as ad_search_class:
+    """Stand in for AD in lookup_ad_entries. Yields the ADSearch instance it will get back."""
+    with patch("storage.utils.ADSearch") as ad_search_class:
         yield ad_search_class.return_value
 
 
@@ -105,7 +105,7 @@ def test_create_project_share_records_success(mock_provision, mock_check, mock_s
     assert state_of(allocation) == ProvisionStatus.SUCCESSFUL
 
 
-@patch("storage.vast.project.schedule")
+@patch("storage.utils.schedule")
 @patch("storage.vast.project.create_project_share_file_structure")
 @patch("storage.vast.project.check_folder")
 @patch("storage.vast.project.provision_share")
@@ -166,7 +166,7 @@ def test_create_course_share_records_success(
     assert state_of(allocation) == ProvisionStatus.SUCCESSFUL
 
 
-@patch("storage.vast.course.schedule")
+@patch("storage.utils.schedule")
 @patch("storage.vast.course.check_folder")
 @patch("storage.vast.course.provision_share")
 def test_create_course_share_waits_when_retries_remain(
@@ -210,7 +210,7 @@ def test_success_clears_a_previous_failure_message(mock_provision, allocation):
     assert message_of(allocation) == "", "the stale reason must be cleared, not left behind"
 
 
-@patch("storage.vast.project.schedule")
+@patch("storage.utils.schedule")
 @patch("storage.vast.project.create_project_share_file_structure")
 @patch("storage.vast.project.check_folder")
 @patch("storage.vast.project.provision_share")

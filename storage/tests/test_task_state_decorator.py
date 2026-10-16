@@ -128,7 +128,7 @@ def test_truenas_create_share_records_failure(mock_provision, allocation):
     assert message_of(allocation) == "TrueNAS exploded"
 
 
-@patch("storage.truenas.schedule")
+@patch("storage.utils.schedule")
 @patch("storage.truenas.provision_share")
 def test_truenas_wait_for_group_waits_when_retries_remain(mock_provision, mock_schedule, allocation):
     mock_provision.side_effect = GroupNotFoundError("Could not find group g in AD")
@@ -140,7 +140,7 @@ def test_truenas_wait_for_group_waits_when_retries_remain(mock_provision, mock_s
     assert message_of(allocation) == "Could not find group g in AD"
 
 
-@patch("storage.truenas.schedule")
+@patch("storage.utils.schedule")
 @patch("storage.truenas.provision_share")
 def test_truenas_wait_for_group_fails_when_retries_exhausted(mock_provision, mock_schedule, allocation):
     mock_provision.side_effect = GroupNotFoundError("Could not find group g in AD")

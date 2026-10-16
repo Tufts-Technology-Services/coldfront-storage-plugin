@@ -1,17 +1,13 @@
-import datetime
 import logging
 from pathlib import Path
 
-from coldfront_utils.util.ad_search import ADSearch
-from django_q.tasks import Schedule, schedule
-
 from storage.directory_structure.tasks import create_project_folders
 from storage.utils import (
-    GroupNotFoundError,
+    ActiveDirectoryNotFoundError,
     TaskRetryScheduled,
-    UIDNotFoundError,
-    UserNotFoundError,
+    lookup_ad_entries,
     records_share_creation_state,
+    schedule_retry,
 )
 from storage.vast.errors import VastViewNotFoundError
 
@@ -53,47 +49,24 @@ def create_project_share(
         create_project_share_file_structure(
             native_path=native_path, owner=owner, group=group, client_config_id=client_config_id
         )
-    except (GroupNotFoundError, VastViewNotFoundError) as e:
-        if retries <= 0:
-            if isinstance(e, VastViewNotFoundError):
-                logger.error(f"VAST view not found for path {native_path} and no retries left")
-            elif isinstance(e, GroupNotFoundError):
-                logger.error(f"Group {group} not found in AD and no retries left")
-            raise
-        else:
-            schedule(
-                "storage.vast.create_project_share",
-                native_path,
-                quota_bytes,
-                owner,
-                group,
-                client_config_id,
-                allocation_pk,
-                retries - 1,
-                wait,
-                schedule_type=Schedule.ONCE,
-                next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
-            )
-            raise TaskRetryScheduled(str(e)) from e
-
-
+    except (ActiveDirectoryNotFoundError, VastViewNotFoundError) as e:
+        schedule_retry(
+            create_project_share,
+            e,
+            retries=retries,
+            wait=wait,
+            native_path=native_path,
+            quota_bytes=quota_bytes,
+            owner=owner,
+            group=group,
+            client_config_id=client_config_id,
+            allocation_pk=allocation_pk,
+        )
+        raise TaskRetryScheduled(str(e)) from e
 
 
 def create_project_share_file_structure(native_path: str, owner: str, group: str, client_config_id: str):
-    ad_search = ADSearch("", "")
-
-    owner_results = ad_search.get_ad_user(owner)
-    if not owner_results:
-        logger.error(f"Could not find owner {owner} in AD")
-        raise UserNotFoundError(f"Could not find owner {owner} in AD")
-    uid = owner_results.get("uidNumber", None)
-    if uid is None:
-        logger.error(f"Could not find UID for owner {owner} in AD")
-        raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
-
-    group_results = ad_search.get_ad_group(group)
-    if not group_results or group_results.get("gidNumber", []) == []:
-        raise GroupNotFoundError(f"Could not find group with GID '{group}' in AD")
+    lookup_ad_entries(owner, group)
 
     cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
 
