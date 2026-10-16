@@ -231,9 +231,9 @@ running services. `storage/tests/settings.py` holds the test settings and `stora
 mounts the plugin's URLs where a deployment's `local_urls.py` mounts them; both are wired up in
 `[tool.pytest.ini_options]`. Shared model fixtures live in `storage/tests/conftest.py`.
 
-Note that `ADSearch` is imported inside the functions that use it rather than at module level, so
-the plugin can be imported without `python-ldap` (which ships as an sdist only and needs OpenLDAP
-headers to build). Keep it that way, or the test suite will stop running anywhere without LDAP.
+`python-ldap` is a dependency, through `coldfront-utils[ad]` (folder creation looks groups up in
+AD). It ships as an sdist only, so installing the plugin builds it, which needs the OpenLDAP client
+headers.
 
 ## Additional Information
 ## Relevant Signals

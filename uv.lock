@@ -391,19 +391,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/f5/b18a751a3ee7efae296f9f6fdbba842cb001fd830a905d78652bf2be57ab/coldfront-1.1.10-py3-none-any.whl", hash = "sha256:a6912f49b5832398d4dec1c88e80a2308583390f829d8d435ba0eafa029f5cd2", size = 1150638, upload-time = "2026-10-04T03:33:27.244Z" },
 ]
 
+[package.optional-dependencies]
+ldap = [
+    { name = "django-auth-ldap" },
+    { name = "ldap3" },
+]
+
 [[package]]
 name = "coldfront-storage-plugin"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "coldfront" },
-    { name = "coldfront-utils" },
+    { name = "coldfront-utils", extra = ["ad"] },
+    { name = "pyinfra" },
 ]
 
 [package.optional-dependencies]
-pyinfra = [
-    { name = "pyinfra" },
-]
 starfish = [
     { name = "starfish-api-client" },
 ]
@@ -427,13 +431,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coldfront", specifier = ">=1.1.8" },
-    { name = "coldfront-utils", git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git" },
-    { name = "pyinfra", marker = "extra == 'pyinfra'", specifier = ">=3.10.0" },
+    { name = "coldfront-utils", extras = ["ad"], git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git" },
+    { name = "pyinfra", specifier = ">=3.10.0" },
     { name = "starfish-api-client", marker = "extra == 'starfish'", git = "https://github.com/Tufts-Technology-Services/starfish-api-client.git" },
     { name = "truenas-utils", marker = "extra == 'truenas'", git = "https://github.com/Tufts-Technology-Services/truenas-utils.git" },
     { name = "vast-api-client", marker = "extra == 'vast'", git = "https://github.com/Tufts-Technology-Services/vast-api-client.git" },
 ]
-provides-extras = ["starfish", "vast", "truenas", "pyinfra"]
+provides-extras = ["starfish", "vast", "truenas"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -451,6 +455,11 @@ version = "0.1.0"
 source = { git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git#3ab8377ad04a9117840566ee371af38a44e6e525" }
 dependencies = [
     { name = "coldfront" },
+]
+
+[package.optional-dependencies]
+ad = [
+    { name = "coldfront", extra = ["ldap"] },
 ]
 
 [[package]]
@@ -708,6 +717,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/85/fe/79e692b430c7721bf4b812c328bfe687e73e3f28f56611a6a18a97e887cc/django-5.2.18.tar.gz", hash = "sha256:461c5dd06d2ea16bd5ca37d3f46e4def1d6b0fe7588c6f4e2119517bb0af8b2d", size = 10910238, upload-time = "2026-10-06T13:01:09.371Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/01/6568ec52b26548ca1b83d33249f7274db3bf74698f42c0da42ec9db1a24a/django-5.2.18-py3-none-any.whl", hash = "sha256:92ed81d500be6408ecd704d7bd1366c534f30427bffcc63c5fefb129561aec7c", size = 8316071, upload-time = "2026-10-06T13:01:04.413Z" },
+]
+
+[[package]]
+name = "django-auth-ldap"
+version = "5.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "python-ldap" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/6d/d3ceb4b49e7153811a4b2d92bbe198a5ef2e2820469add3d6dc129ef2fab/django_auth_ldap-5.3.0.tar.gz", hash = "sha256:743d8107b146240b46f7e97207dc06cb11facc0cd70dce490b7ca09dd5643d19", size = 55272, upload-time = "2025-12-26T15:00:14.272Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/91/38ba24b9d76925ce166b2eebe1b4ea460063b8ba8cf91d39d97ee3bad517/django_auth_ldap-5.3.0-py3-none-any.whl", hash = "sha256:aa880415983149b072f876d976ef8ec755a438090e176817998263a6ed9e1038", size = 20975, upload-time = "2025-12-26T15:00:12.52Z" },
 ]
 
 [[package]]
@@ -1134,6 +1156,18 @@ wheels = [
 ]
 
 [[package]]
+name = "ldap3"
+version = "2.9.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyasn1" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/ac/96bd5464e3edbc61595d0d69989f5d9969ae411866427b2500a8e5b812c0/ldap3-2.9.1.tar.gz", hash = "sha256:f3e7fc4718e3f09dda568b57100095e0ce58633bcabbed8667ce3f8fbaa4229f", size = 398830, upload-time = "2021-07-18T06:34:21.786Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/f6/71d6ec9f18da0b2201287ce9db6afb1a1f637dedb3f0703409558981c723/ldap3-2.9.1-py2.py3-none-any.whl", hash = "sha256:5869596fc4948797020d3f03b7939da938778a0f9e2009f7a072ccf92b8e8d70", size = 432192, upload-time = "2021-07-18T06:34:12.905Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1283,6 +1317,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/74/89/1f3e8e1fc3e97de0fa963495832f581f025f29471602a309e48808244292/pre_commit-4.6.2.tar.gz", hash = "sha256:8f5d7bfb021ecdbcd9d49d89847082dd24172ccde534390081a679ad046e2441", size = 198670, upload-time = "2026-08-10T22:07:18.421Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/e2/bbb7129c9e7999a6b8ee9cca3b66486c25c423ab5a75f34071798b74ce94/pre_commit-4.6.2-py2.py3-none-any.whl", hash = "sha256:e2dde9a75d3bce11bd3831c26d134df00a2803c1d818be6a0383c3dcda25dc4e", size = 226202, upload-time = "2026-08-10T22:07:16.942Z" },
+]
+
+[[package]]
+name = "pyasn1"
+version = "0.6.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/9a/23310166d960def5897e91fe20e5b724601b02a22e84ba1f94232c0b7f67/pyasn1-0.6.4.tar.gz", hash = "sha256:9c447d8431c947fe4c8febc4ed9e760bc29011a5b01e5c74b67025bd9fb8ce81", size = 151262, upload-time = "2026-07-09T01:12:33.988Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/3b/6163796d69c3977d1e4287bea4a6979161cbbdd170ebb430511e8e1999ce/pyasn1-0.6.4-py3-none-any.whl", hash = "sha256:deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b", size = 84410, upload-time = "2026-07-09T01:12:32.92Z" },
+]
+
+[[package]]
+name = "pyasn1-modules"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyasn1" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6", size = 307892, upload-time = "2025-03-28T02:41:22.17Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a", size = 181259, upload-time = "2025-03-28T02:41:19.028Z" },
 ]
 
 [[package]]
@@ -1582,6 +1637,16 @@ sdist = { url = "https://files.pythonhosted.org/packages/0c/57/250bd238b966cece4
 wheels = [
     { url = "https://files.pythonhosted.org/packages/16/7d/e9ffbadfbf89c93848412d04594135c4ae8c1d37d9e053b9c3ed718fabc4/python_discovery-1.6.1-py3-none-any.whl", hash = "sha256:d43fcdef879fe795352bd13ccf8d185ba5a9f86f36cfcd00529f596e737442b3", size = 38664, upload-time = "2026-09-18T01:31:52.448Z" },
 ]
+
+[[package]]
+name = "python-ldap"
+version = "3.4.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyasn1" },
+    { name = "pyasn1-modules" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/45/489fcf46984f916ef165cdc6a2a1f1ca01ab6f486d47169256ebe44bdd62/python_ldap-3.4.8.tar.gz", hash = "sha256:18dc7460470c6ff64ed5c04ee21c56dbfee7ab433a53213ba91e407eea44c34c", size = 387710, upload-time = "2026-09-16T12:41:20.15Z" }
 
 [[package]]
 name = "pyyaml"

@@ -24,7 +24,10 @@ classifiers = [
 dependencies = [
     # 1.1.8 is the first release with AllocationAttributeEditView, which storage.views subclasses
     "coldfront>=1.1.8",
-    "coldfront_utils@git+https://github.com/Tufts-Technology-Services/coldfront-utils.git",
+    # [ad]: folder creation looks up groups with coldfront_utils' ADSearch, which needs python-ldap
+    "coldfront_utils[ad]@git+https://github.com/Tufts-Technology-Services/coldfront-utils.git",
+    # storage.tasks imports the pyinfra folder creation code, so the plugin can't load without it
+    "pyinfra>=3.10.0",
 ]
 
 [project.urls]
@@ -41,10 +44,6 @@ vast = [
 
 truenas = [
     "truenas_utils@git+https://github.com/Tufts-Technology-Services/truenas-utils.git",
-]
-
-pyinfra = [
-    "pyinfra>=3.10.0",
 ]
 
 [dependency-groups]
