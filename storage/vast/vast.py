@@ -3,20 +3,21 @@ import logging
 from pathlib import Path
 
 import requests
-from coldfront.core.allocation.models import Allocation
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, ttl_cache, update_allocation_attribute_value, validate_posix_path
-from coldfront_utils.util.ad_search import ADSearch
 
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,
     QUOTA_IN_BYTES_ATTRIBUTE_NAME,
     QUOTA_REPORT_DATE_ATTRIBUTE_NAME,
-    QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
-    SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     STORAGE_PLUGIN_STORAGE_UNITS,
 )
-from storage.utils import GroupNotFoundError, get_client_config
+from storage.utils import (
+    GroupNotFoundError,
+    get_client_config,
+    records_quota_update_state,
+    records_share_creation_state,
+)
 from storage.vast.errors import VastViewNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -82,180 +83,154 @@ def get_all_quotas(client_config_id: str) -> list:
     return [{field: i[field] for field in retained_fields} for i in all_quotas]
 
 
+@records_quota_update_state
 def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocation_pk: int) -> None:
-    try:
-        vc = get_vast_client(client_config_id)
-        if native_path and quota_bytes is not None:
-            vast_path = native_path.strip()  # remove any leading or trailing whitespace
-            validate_posix_path(vast_path)  # validate the path before using it to set the quota
-            quota_match = vc.get_quotas(path=Path(vast_path))
-            if len(quota_match) == 0:
-                logger.error(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
-                raise ValueError(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
-            logger.info(f"Updating quota for path {vast_path} to {quota_bytes / 10**12} TB")
-            logger.debug(f"Quota match details: {quota_match[0]}")
-            vc.update_quota_size(quota_match[0]["id"], quota_bytes)
-            update_allocation_attribute_value(
-                Allocation.objects.get(id=allocation_pk), QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, "success"
-            )
-        else:
-            raise ValueError(
-                "Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes."
-            )
-    except Exception as e:
-        logger.error(f"Error setting quota for path {native_path} in VAST: {e}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, "failed"
-        )
-        raise e
+    """Task entry point: resize a quota. The decorator records the outcome on the allocation."""
+    if not native_path or quota_bytes is None:
+        raise ValueError("Missing a VAST Path attribute or quota attribute. Cannot set quota without these attributes.")
+
+    vc = get_vast_client(client_config_id)
+    vast_path = native_path.strip()  # remove any leading or trailing whitespace
+    validate_posix_path(vast_path)  # validate the path before using it to set the quota
+    quota_match = vc.get_quotas(path=Path(vast_path))
+    if len(quota_match) == 0:
+        raise ValueError(f"No existing quota found for path {vast_path}. Cannot set quota for this path.")
+    logger.info(f"Updating quota for path {vast_path} to {quota_bytes / 10**12} TB")
+    logger.debug(f"Quota match details: {quota_match[0]}")
+    vc.update_quota_size(quota_match[0]["id"], quota_bytes)
 
 
+@records_share_creation_state
 def create_share(
     native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int
 ) -> None:
-    try:
-        vc = get_vast_client(client_config_id)
-        params = get_vast_params(client_config_id)
+    """Task entry point: provision a share. The decorator records the outcome on the allocation."""
+    provision_share(native_path, quota_bytes, client_config_id)
 
-        if native_path and quota_bytes:
-            validate_posix_path(native_path.strip())  # validate the path before using it to set the quota
-            vast_path = Path(
-                native_path.strip()
-            )  # convert to Path object for easier manipulation and to ensure consistent formatting
-            # view create will create the directory
-            view = vc.get_views(path=vast_path)
-            if len(view) > 0:
-                logger.warning(f"{vast_path} View already exists")
-            else:
-                share_name = None if not params.get("include_share") else f"{vast_path.name}$"
-                logger.info(f"Creating view {vast_path}")
-                vc.add_view(
-                    path=vast_path,
-                    protocols=params.get("protocols"),
-                    policy_id=params.get("view_policy_id"),
-                    share_name=share_name,
-                )
-            quota_obj = vc.get_quotas(path=vast_path)
-            if len(quota_obj) > 0:
-                logger.warning(f"{vast_path} Quota already exists")
-            else:
-                soft_limit = quota_bytes
-                margin_percent = params.get("quota_margin_percent", 0)
-                if margin_percent > 0:
-                    soft_limit = int(quota_bytes * (100 - margin_percent) / 100)
-                logger.info(
-                    f"Creating quota for {vast_path} with hard limit {quota_bytes / 10**12} TB and soft limit {soft_limit / 10**12} TB"
-                )
-                vc.add_quota(name=vast_path.name, path=vast_path, hard_limit=quota_bytes, soft_limit=soft_limit)
-            protected_path = vc.get_protected_paths(source_dir=vast_path)
-            if len(protected_path) > 0:
-                logger.warning(f"{vast_path} Protected path already exists")
-            else:
-                logger.info(
-                    f"Creating protected path for {vast_path} with snapshot name {params.get('snapshot_name_template').format(vast_path.name)}"
-                )
-                vc.add_protected_path(
-                    name=params.get("snapshot_name_template").format(vast_path.name),
-                    source_dir=vast_path,
-                    tenant_id=params.get("tenant_id"),
-                    protection_policy_id=params.get("protection_policy_id"),
-                )
-            update_allocation_attribute_value(
-                Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "success"
-            )
-        else:
-            raise ValueError(
-                "Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes."
-            )
-    except Exception as e:
-        logger.error(f"Error creating share for path {native_path} in VAST: {e}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
+
+def provision_share(native_path: str, quota_bytes: int, client_config_id: str) -> None:
+    """Create the VAST view, quota and protected path for a path.
+
+    Raises on failure and records no allocation state, so that callers which do more work after
+    provisioning can own the share creation state for the whole of their own task.
+    """
+    vc = get_vast_client(client_config_id)
+    params = get_vast_params(client_config_id)
+
+    if not native_path or not quota_bytes:
+        raise ValueError(
+            "Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes."
         )
-        raise e
+
+    validate_posix_path(native_path.strip())  # validate the path before using it to set the quota
+    vast_path = Path(
+        native_path.strip()
+    )  # convert to Path object for easier manipulation and to ensure consistent formatting
+    # view create will create the directory
+    view = vc.get_views(path=vast_path)
+    if len(view) > 0:
+        logger.warning(f"{vast_path} View already exists")
+    else:
+        share_name = None if not params.get("include_share") else f"{vast_path.name}$"
+        logger.info(f"Creating view {vast_path}")
+        vc.add_view(
+            path=vast_path,
+            protocols=params.get("protocols"),
+            policy_id=params.get("view_policy_id"),
+            share_name=share_name,
+        )
+    add_quota_and_protected_path(vc, params, vast_path, quota_bytes)
 
 
+def add_quota_and_protected_path(vc, params: dict, vast_path: Path, quota_bytes: int) -> None:
+    """Give a view its quota and protected path, if it does not already have them."""
+    quota_obj = vc.get_quotas(path=vast_path)
+    if len(quota_obj) > 0:
+        logger.warning(f"{vast_path} Quota already exists")
+    else:
+        soft_limit = quota_bytes
+        margin_percent = params.get("quota_margin_percent", 0)
+        if margin_percent > 0:
+            soft_limit = int(quota_bytes * (100 - margin_percent) / 100)
+        logger.info(
+            f"Creating quota for {vast_path} with hard limit {quota_bytes / 10**12} TB and soft limit {soft_limit / 10**12} TB"
+        )
+        vc.add_quota(name=vast_path.name, path=vast_path, hard_limit=quota_bytes, soft_limit=soft_limit)
+    protected_path = vc.get_protected_paths(source_dir=vast_path)
+    if len(protected_path) > 0:
+        logger.warning(f"{vast_path} Protected path already exists")
+    else:
+        logger.info(
+            f"Creating protected path for {vast_path} with snapshot name {params.get('snapshot_name_template').format(vast_path.name)}"
+        )
+        vc.add_protected_path(
+            name=params.get("snapshot_name_template").format(vast_path.name),
+            source_dir=vast_path,
+            tenant_id=params.get("tenant_id"),
+            protection_policy_id=params.get("protection_policy_id"),
+        )
+
+
+@records_share_creation_state
 def create_smb_share(
     native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int
 ) -> None:
-    try:
-        vc = get_vast_client(client_config_id)
-        params = get_vast_params(client_config_id)
-        ad_search = ADSearch("", "")
-        group_info = ad_search.get_ad_group(group)
-        if not group_info:
-            raise GroupNotFoundError(
-                f"Group {group} does not exist in Active Directory. Cannot create SMB share without a valid group."
-            )
-        if native_path and quota_bytes:
-            validate_posix_path(native_path.strip())  # validate the path before using it to set the quota
-            vast_path = Path(
-                native_path.strip()
-            )  # convert to Path object for easier manipulation and to ensure consistent formatting
-            # view create will create the directory
-            view = vc.get_views(path=vast_path)
-            if len(view) > 0:
-                logger.warning(f"{vast_path} View already exists")
-            else:
-                share_name = f"{vast_path.name}$"
-                # create acls
-                acls = [vc.create_acl_from_str(**params["smb_admin_acls"])]
-                acls.append(
-                    vc.create_acl_from_str(
-                        **{
-                            "perm": "FULL",
-                            "grantee": "groups",
-                            "sid_str": group_info.get("objectSid")[0],
-                            "uid_or_gid": group_info.get("gidNumber", [None])[0],
-                        }
-                    )
-                )
-                logger.info(f"Creating SMB view {vast_path}")
-                vc.add_view(
-                    path=vast_path,
-                    protocols=params.get("protocols"),
-                    policy_id=params.get("view_policy_id"),
-                    share_name=share_name,
-                    acls=acls,
-                )
-            quota_obj = vc.get_quotas(path=vast_path)
-            if len(quota_obj) > 0:
-                logger.warning(f"{vast_path} Quota already exists")
-            else:
-                soft_limit = quota_bytes
-                margin_percent = params.get("quota_margin_percent", 0)
-                if margin_percent > 0:
-                    soft_limit = int(quota_bytes * (100 - margin_percent) / 100)
-                logger.info(
-                    f"Creating quota for {vast_path} with hard limit {quota_bytes / 10**12} TB and soft limit {soft_limit / 10**12} TB"
-                )
-                vc.add_quota(name=vast_path.name, path=vast_path, hard_limit=quota_bytes, soft_limit=soft_limit)
-            protected_path = vc.get_protected_paths(source_dir=vast_path)
-            if len(protected_path) > 0:
-                logger.warning(f"{vast_path} Protected path already exists")
-            else:
-                logger.info(
-                    f"Creating protected path for {vast_path} with snapshot name {params.get('snapshot_name_template').format(vast_path.name)}"
-                )
-                vc.add_protected_path(
-                    name=params.get("snapshot_name_template").format(vast_path.name),
-                    source_dir=vast_path,
-                    tenant_id=params.get("tenant_id"),
-                    protection_policy_id=params.get("protection_policy_id"),
-                )
-            update_allocation_attribute_value(
-                Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "success"
-            )
-        else:
-            raise ValueError(
-                "Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes."
-            )
-    except Exception as e:
-        logger.error(f"Error creating share for path {native_path} in VAST: {e}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
+    """Task entry point: provision an SMB share. The decorator records the outcome."""
+    provision_smb_share(native_path, quota_bytes, group, client_config_id)
+
+
+def provision_smb_share(native_path: str, quota_bytes: int, group: str, client_config_id: str) -> None:
+    """Create the VAST SMB view, quota and protected path for a path.
+
+    Raises on failure and records no allocation state, for the same reason as provision_share.
+    """
+    vc = get_vast_client(client_config_id)
+    params = get_vast_params(client_config_id)
+    # imported lazily: python-ldap is only needed when actually talking to AD
+    from coldfront_utils.util.ad_search import ADSearch
+
+    ad_search = ADSearch("", "")
+    group_info = ad_search.get_ad_group(group)
+    if not group_info:
+        raise GroupNotFoundError(
+            f"Group {group} does not exist in Active Directory. Cannot create SMB share without a valid group."
         )
-        raise e
+    if not native_path or not quota_bytes:
+        raise ValueError(
+            "Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes."
+        )
+
+    validate_posix_path(native_path.strip())  # validate the path before using it to set the quota
+    vast_path = Path(
+        native_path.strip()
+    )  # convert to Path object for easier manipulation and to ensure consistent formatting
+    # view create will create the directory
+    view = vc.get_views(path=vast_path)
+    if len(view) > 0:
+        logger.warning(f"{vast_path} View already exists")
+    else:
+        share_name = f"{vast_path.name}$"
+        # create acls
+        acls = [vc.create_acl_from_str(**params["smb_admin_acls"])]
+        acls.append(
+            vc.create_acl_from_str(
+                **{
+                    "perm": "FULL",
+                    "grantee": "groups",
+                    "sid_str": group_info.get("objectSid")[0],
+                    "uid_or_gid": group_info.get("gidNumber", [None])[0],
+                }
+            )
+        )
+        logger.info(f"Creating SMB view {vast_path}")
+        vc.add_view(
+            path=vast_path,
+            protocols=params.get("protocols"),
+            policy_id=params.get("view_policy_id"),
+            share_name=share_name,
+            acls=acls,
+        )
+    add_quota_and_protected_path(vc, params, vast_path, quota_bytes)
 
 
 def check_folder(native_path: str, client_config_id: str):

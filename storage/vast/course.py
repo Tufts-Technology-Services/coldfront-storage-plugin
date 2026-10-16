@@ -2,21 +2,24 @@ import datetime
 import logging
 from pathlib import Path
 
-from coldfront.core.allocation.models import Allocation
-from coldfront_utils import update_allocation_attribute_value
-from coldfront_utils.util.ad_search import ADSearch
 from django_q.tasks import Schedule, schedule
 
-from storage.constants import SHARE_CREATION_STATE_ATTRIBUTE_NAME
 from storage.directory_structure.tasks import create_course_folders
-from storage.utils import GroupNotFoundError, UIDNotFoundError, UserNotFoundError
+from storage.utils import (
+    GroupNotFoundError,
+    TaskRetryScheduled,
+    UIDNotFoundError,
+    UserNotFoundError,
+    records_share_creation_state,
+)
 from storage.vast.errors import VastViewNotFoundError
 
-from .vast import check_folder, create_share, native_path_to_cluster_path
+from .vast import check_folder, native_path_to_cluster_path, provision_share
 
 logger = logging.getLogger(__name__)
 
 
+@records_share_creation_state
 def create_course_share(
     native_path: str,
     quota_bytes: int,
@@ -40,19 +43,17 @@ def create_course_share(
         retries (int, optional): The number of retries if the group is not found in AD. Defaults to 5.
         wait (int, optional): The wait time between retries in minutes. Defaults to 5.
     """
-    create_share(
-        native_path=native_path.lower(),
-        quota_bytes=quota_bytes,
-        owner=owner,
-        group=group,
-        client_config_id=client_config_id,
-        allocation_pk=allocation_pk,
-    )
-
-    allocation = Allocation.objects.get(id=allocation_pk)
-    update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "pending")
 
     try:
+        provision_share(
+            native_path=native_path.lower(),
+            quota_bytes=quota_bytes,
+            client_config_id=client_config_id,
+        )
+
+        # imported lazily: python-ldap is only needed when actually talking to AD
+        from coldfront_utils.util.ad_search import ADSearch
+
         ad_search = ADSearch("", "")
         owner_results = ad_search.get_ad_user(owner)
         if not owner_results:
@@ -73,10 +74,8 @@ def create_course_share(
                 logger.error(f"VAST view not found for path {native_path} and no retries left")
             elif isinstance(e, GroupNotFoundError):
                 logger.error(f"Group {group} not found in AD and no retries left")
-            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed")
-            raise e
+            raise
         else:
-            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "waiting...")
             schedule(
                 "storage.vast.create_course_share",
                 native_path,
@@ -90,7 +89,5 @@ def create_course_share(
                 schedule_type=Schedule.ONCE,
                 next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
             )
-    except Exception as e:
-        logger.error(f"Error creating course share for path {cluster_path}: {e}")
-        update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed")
-        raise e
+            raise TaskRetryScheduled(str(e)) from e
+

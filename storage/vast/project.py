@@ -2,21 +2,24 @@ import datetime
 import logging
 from pathlib import Path
 
-from coldfront.core.allocation.models import Allocation
-from coldfront_utils import update_allocation_attribute_value
-from coldfront_utils.util.ad_search import ADSearch
 from django_q.tasks import Schedule, schedule
 
-from storage.constants import SHARE_CREATION_STATE_ATTRIBUTE_NAME
 from storage.directory_structure.tasks import create_project_folders
-from storage.utils import GroupNotFoundError, UIDNotFoundError, UserNotFoundError
+from storage.utils import (
+    GroupNotFoundError,
+    TaskRetryScheduled,
+    UIDNotFoundError,
+    UserNotFoundError,
+    records_share_creation_state,
+)
 from storage.vast.errors import VastViewNotFoundError
 
-from .vast import check_folder, create_share, native_path_to_cluster_path
+from .vast import check_folder, native_path_to_cluster_path, provision_share
 
 logger = logging.getLogger(__name__)
 
 
+@records_share_creation_state
 def create_project_share(
     native_path: str,
     quota_bytes: int,
@@ -39,19 +42,12 @@ def create_project_share(
         client_config_id (str): The client config id to use for connecting to VAST
         allocation_pk (int): The allocation primary key, used for logging and tracking purposes
     """
-    create_share(
-        native_path=native_path.lower(),
-        quota_bytes=quota_bytes,
-        owner=owner,
-        group=group,
-        client_config_id=client_config_id,
-        allocation_pk=allocation_pk,
-    )
-
-    allocation = Allocation.objects.get(id=allocation_pk)
-    # reset state to pending
-    update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "pending")
     try:
+        provision_share(
+            native_path=native_path.lower(),
+            quota_bytes=quota_bytes,
+            client_config_id=client_config_id,
+        )
         check_folder(native_path, client_config_id=client_config_id)
         create_project_share_file_structure(
             native_path=native_path, owner=owner, group=group, client_config_id=client_config_id
@@ -62,10 +58,8 @@ def create_project_share(
                 logger.error(f"VAST view not found for path {native_path} and no retries left")
             elif isinstance(e, GroupNotFoundError):
                 logger.error(f"Group {group} not found in AD and no retries left")
-            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed")
-            raise e
+            raise
         else:
-            update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "waiting...")
             schedule(
                 "storage.vast.create_project_share",
                 native_path,
@@ -79,15 +73,15 @@ def create_project_share(
                 schedule_type=Schedule.ONCE,
                 next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
             )
-            return
+            raise TaskRetryScheduled(str(e)) from e
 
-    except Exception as e:
-        logger.error(f"Error creating project share for path {native_path} in VAST: {e}")
-        update_allocation_attribute_value(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed")
-        raise e
+
 
 
 def create_project_share_file_structure(native_path: str, owner: str, group: str, client_config_id: str):
+    # imported lazily: python-ldap is only needed when actually talking to AD
+    from coldfront_utils.util.ad_search import ADSearch
+
     ad_search = ADSearch("", "")
 
     owner_results = ad_search.get_ad_user(owner)

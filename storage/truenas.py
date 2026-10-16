@@ -1,49 +1,43 @@
 import datetime
 import logging
 
-from coldfront.core.allocation.models import Allocation
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
-from coldfront_utils.util.ad_search import ADSearch
 from django_q.tasks import Schedule, schedule
 
 from .constants import (
     QUOTA_ATTRIBUTE_NAME,
     QUOTA_IN_BYTES_ATTRIBUTE_NAME,
     QUOTA_REPORT_DATE_ATTRIBUTE_NAME,
-    QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
-    SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     STORAGE_PLUGIN_STORAGE_UNITS,
 )
 from .utils import (
     GIDNotFoundError,
     GroupNotFoundError,
+    TaskRetryScheduled,
     UIDNotFoundError,
     UserNotFoundError,
     get_client_config,
+    records_quota_update_state,
+    records_share_creation_state,
     update_allocation_attribute_value,
 )
 
 logger = logging.getLogger(__name__)
 
 
+@records_quota_update_state
 def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocation_pk: int) -> None:
-    try:
-        allocation = Allocation.objects.get(id=allocation_pk)
-        tc = get_truenas_client(client_config_id)
-        truenas_path = native_path.strip()  # remove any leading or trailing whitespace
-        validate_posix_path(truenas_path)  # validate the path before using it to set the quota
-        share_details = tc.get_dataset_info(truenas_path, details=True)
-        if not share_details:
-            raise ValueError(f"Dataset {truenas_path} does not exist. Please create it first.")
-        # truenas path looks like f"/mnt/{conf['parent_dataset']}/{project_name}"
-        logger.info(f"Setting quota for path {truenas_path} to {quota_bytes / 10**12} TB")
-        tc.update_quota(truenas_path, quota_bytes)
-        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, "success")
-    except Exception as e:
-        logger.error(f"Error setting quota for path {native_path} in TrueNAS: {e}")
-        update_allocation_attribute_value(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, "failed")
-        raise e
+    """Task entry point: resize a quota. The decorator records the outcome on the allocation."""
+    tc = get_truenas_client(client_config_id)
+    truenas_path = native_path.strip()  # remove any leading or trailing whitespace
+    validate_posix_path(truenas_path)  # validate the path before using it to set the quota
+    share_details = tc.get_dataset_info(truenas_path, details=True)
+    if not share_details:
+        raise ValueError(f"Dataset {truenas_path} does not exist. Please create it first.")
+    # truenas path looks like f"/mnt/{conf['parent_dataset']}/{project_name}"
+    logger.info(f"Setting quota for path {truenas_path} to {quota_bytes / 10**12} TB")
+    tc.update_quota(truenas_path, quota_bytes)
 
 
 def get_quotas_batch(resource_id, client_config_id):
@@ -79,71 +73,69 @@ def get_quotas_batch(resource_id, client_config_id):
             logger.warning(f"Allocation {allocation} does not have a Storage Path attribute")
 
 
+@records_share_creation_state
 def create_share(
     native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str, allocation_pk: int
 ) -> None:
-    try:
-        truenas_path = native_path.strip()  # remove any leading or trailing whitespace
-        validate_posix_path(truenas_path)  # validate the path before using it to set the quota
-
-        tc = get_truenas_client(client_config_id)
-        # check if share exists
-        logger.debug("checking share details...")
-        share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
-        # based on share details, request share creation
-        if (
-            share_details["dataset_exists"]
-            and share_details["quota_matches"]
-            and share_details["starfish_share_exists"]
-            and share_details["globus_share_exists"]
-        ):
-            logger.info(f"Share {truenas_path} already exists with quota {quota_bytes / 10**12} TB. No action needed.")
-        else:
-            logger.info(
-                f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB..."
-            )
-            # get uid, gid, and quota for this allocation
-            ad_search = ADSearch("", "")
-            owner_results = ad_search.get_ad_user(owner)
-            if not owner_results:
-                raise UserNotFoundError(f"Could not find owner {owner} in AD")
-            uid = owner_results.get("uidNumber", None)
-            if not uid:
-                raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
-            group_results = ad_search.get_ad_group(group)
-            if not group_results:
-                raise GroupNotFoundError(f"Could not find group {group} in AD")
-            gid = group_results.get("gidNumber", None)
-            if not gid:
-                raise GIDNotFoundError(f"Could not find GID for group {group} in AD")
-            tc.create_project_share(
-                truenas_path,
-                quota_bytes,
-                uid[0],
-                gid[0],
-                create_dataset=(not share_details["dataset_exists"]),
-                create_globus_share=(not share_details["globus_share_exists"]),
-                create_starfish_share=(not share_details["starfish_share_exists"]),
-                create_gateway_share=(not share_details["gateway_share_exists"]),
-            )
-            logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "success"
-        )
-    except GroupNotFoundError as e:
-        logger.error(f"Group {group} not found in AD.: {e}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
-        )
-        raise e
-    except Exception as e:
-        logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
-        )
-        raise e
+    """Task entry point: provision a share. The decorator records the outcome on the allocation."""
+    provision_share(native_path, quota_bytes, owner, group, client_config_id)
 
 
+def provision_share(native_path: str, quota_bytes: int, owner: str, group: str, client_config_id: str) -> None:
+    """Create the TrueNAS dataset, quota and shares for a path.
+
+    Raises on failure and records no allocation state, so that callers which retry or do more work
+    can own the share creation state for the whole of their own task.
+    """
+    truenas_path = native_path.strip()  # remove any leading or trailing whitespace
+    validate_posix_path(truenas_path)  # validate the path before using it to set the quota
+
+    tc = get_truenas_client(client_config_id)
+    # check if share exists
+    logger.debug("checking share details...")
+    share_details = tc.check_share_details(truenas_path, quota_bytes, 0, 0)
+    # based on share details, request share creation
+    if (
+        share_details["dataset_exists"]
+        and share_details["quota_matches"]
+        and share_details["starfish_share_exists"]
+        and share_details["globus_share_exists"]
+    ):
+        logger.info(f"Share {truenas_path} already exists with quota {quota_bytes / 10**12} TB. No action needed.")
+        return
+
+    logger.info(f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB...")
+    # imported lazily: python-ldap is only needed when actually talking to AD
+    from coldfront_utils.util.ad_search import ADSearch
+
+    # get uid, gid, and quota for this allocation
+    ad_search = ADSearch("", "")
+    owner_results = ad_search.get_ad_user(owner)
+    if not owner_results:
+        raise UserNotFoundError(f"Could not find owner {owner} in AD")
+    uid = owner_results.get("uidNumber", None)
+    if not uid:
+        raise UIDNotFoundError(f"Could not find UID for owner {owner} in AD")
+    group_results = ad_search.get_ad_group(group)
+    if not group_results:
+        raise GroupNotFoundError(f"Could not find group {group} in AD")
+    gid = group_results.get("gidNumber", None)
+    if not gid:
+        raise GIDNotFoundError(f"Could not find GID for group {group} in AD")
+    tc.create_project_share(
+        truenas_path,
+        quota_bytes,
+        uid[0],
+        gid[0],
+        create_dataset=(not share_details["dataset_exists"]),
+        create_globus_share=(not share_details["globus_share_exists"]),
+        create_starfish_share=(not share_details["starfish_share_exists"]),
+        create_gateway_share=(not share_details["gateway_share_exists"]),
+    )
+    logger.info(f"Share {truenas_path} created with quota {quota_bytes}")
+
+
+@records_share_creation_state
 def create_share_wait_for_group(
     native_path: str,
     quota_bytes: int,
@@ -155,17 +147,12 @@ def create_share_wait_for_group(
     wait=5,
 ):
     try:
-        create_share(native_path, quota_bytes, owner, group, client_config_id, allocation_pk)
+        # the action, not the create_share task: nesting the tasks would nest their state handling
+        provision_share(native_path, quota_bytes, owner, group, client_config_id)
     except (GroupNotFoundError, GIDNotFoundError) as e:
         if retries <= 0:
             logger.error(f"Exceeded maximum retries for group {group} not found in AD.")
-            update_allocation_attribute_value(
-                Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
-            )
-            raise e
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "waiting..."
-        )
+            raise
         logger.error(f"Group {group} not found in AD. Retrying after a delay: {e}")
         schedule(
             "storage.truenas.create_share_wait_for_group",
@@ -182,13 +169,7 @@ def create_share_wait_for_group(
             schedule_type=Schedule.ONCE,
             next_run=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=wait),
         )
-        return
-    except Exception as e:
-        logger.error(f"Error creating share for path {native_path} in TrueNAS: {e}")
-        update_allocation_attribute_value(
-            Allocation.objects.get(id=allocation_pk), SHARE_CREATION_STATE_ATTRIBUTE_NAME, "failed"
-        )
-        raise e
+        raise TaskRetryScheduled(str(e)) from e
 
 
 def get_truenas_client(client_config_id):

@@ -1,15 +1,187 @@
-from datetime import datetime, timezone
+import functools
+import inspect
 import logging
-from django.conf import settings
 import re
-from coldfront.core.project.models import ProjectAttribute
-from coldfront.core.resource.models import ResourceAttribute 
-from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
-from .constants import GROUP_ATTRIBUTE_NAME, QUOTA_ATTRIBUTE_NAME, USAGE_IN_BYTES_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS, USAGE_REPORT_DATE_ATTRIBUTE_NAME
-from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
+from datetime import datetime, timezone
 
+from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
+from coldfront.core.project.models import ProjectAttribute
+from coldfront.core.resource.models import ResourceAttribute
+from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
+from coldfront_utils.attribute.attribute import create_allocation_attribute_type
+from coldfront_utils.signals import (
+    quota_update_failed,
+    quota_update_successful,
+    share_creation_failed,
+    share_creation_successful,
+)
+from django.conf import settings
+
+from .constants import (
+    GROUP_ATTRIBUTE_NAME,
+    QUOTA_ATTRIBUTE_NAME,
+    QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME,
+    QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
+    SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
+    SHARE_CREATION_STATE_ATTRIBUTE_NAME,
+    STORAGE_PLUGIN_STORAGE_UNITS,
+    USAGE_IN_BYTES_ATTRIBUTE_NAME,
+    USAGE_REPORT_DATE_ATTRIBUTE_NAME,
+    ProvisionStatus,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class TaskRetryScheduled(Exception):
+    """Raised by a task body that has already scheduled its own retry.
+
+    Tells the state decorator to record ProvisionStatus.SCHEDULED rather than FAILED, and not to re-raise:
+    the task has not failed, it is just set to run again later.
+    """
+
+
+def _records_task_state(setter):
+    """Build a decorator that records a task's state through the given setter.
+
+    The wrapped task must take allocation_pk, positionally or by keyword. It is entered with the
+    state set to started; returning records successful, raising TaskRetryScheduled records scheduled,
+    and any other exception records failed with the exception as the message before re-raising.
+
+    This means a task body does the work and nothing else: every state write lives here, so a task
+    cannot forget a transition or leave an allocation parked in started. A decorated task must not
+    call another decorated task, or the two would both record state for the same run.
+
+    Whatever the body returns, the task returns a dict carrying a "message" of "<state>:<reason>",
+    so the outcome is readable from the django_q Task result and not only from the allocation.
+
+    Recording successful or failed also sends the matching outcome signal (see the setters), with
+    the task function as sender.
+    """
+
+    def decorate(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            allocation = _allocation_from_call(func, args, kwargs)
+            # the wrapper, not func, is the sender: the decorated name is what a receiver has to
+            # hand, so that is what sender=... has to match
+            setter(allocation, ProvisionStatus.STARTED, sender=wrapper)
+            try:
+                result = func(*args, **kwargs)
+            except TaskRetryScheduled as e:
+                logger.info(f"{func.__qualname__} is scheduled to run again for allocation {allocation.pk}: {e}")
+                setter(allocation, ProvisionStatus.SCHEDULED, str(e), sender=wrapper)
+                return _task_result(ProvisionStatus.SCHEDULED, str(e))
+            except Exception as e:
+                logger.error(f"{func.__qualname__} failed for allocation {allocation.pk}: {e}")
+                setter(allocation, ProvisionStatus.FAILED, str(e), sender=wrapper, exception=e)
+                raise
+            payload = _task_result(ProvisionStatus.SUCCESSFUL, "", result)
+            setter(allocation, ProvisionStatus.SUCCESSFUL, sender=wrapper, result=payload)
+            return payload
+
+        return wrapper
+
+    return decorate
+
+
+def _announce_outcome(signals, sender, allocation, state, message, result, exception) -> None:
+    """Send the outcome signal for a final state, without letting a receiver change the outcome.
+
+    `signals` maps SUCCESSFUL and FAILED to their signals; nothing is sent for started or scheduled,
+    which aren't outcomes. send_robust, not send: the state is recorded by this point, so a receiver
+    blowing up must not propagate out of the task -- have django_q record as failed something that
+    succeeded, or replace a failed task's own exception. Receiver failures are logged instead.
+    """
+    signal = signals.get(state)
+    if signal is None:
+        return
+    if state == ProvisionStatus.SUCCESSFUL:
+        arguments = {"result": result if result is not None else _task_result(state, message)}
+    else:
+        arguments = {"message": message, "exception": exception}
+    for receiver, response in signal.send_robust(sender=sender, allocation=allocation, **arguments):
+        if isinstance(response, Exception):
+            logger.exception(
+                f"receiver {getattr(receiver, '__qualname__', receiver)} failed handling the {state} outcome of "
+                f"{getattr(sender, '__qualname__', sender)} for allocation {allocation.pk}: {response}",
+                exc_info=response,
+            )
+
+
+def _task_result(state: ProvisionStatus, reason: str, returned=None) -> dict:
+    """Build what a decorated task returns: its status, plus anything the body returned.
+
+    A body that returns a dict has its keys carried through; any other value is kept under
+    "result". "message" is reserved for the status and always wins, so that a caller can rely on
+    it being present and well formed whatever the body did.
+    """
+    result = dict(returned) if isinstance(returned, dict) else {}
+    if returned is not None and not isinstance(returned, dict):
+        result["result"] = returned
+    result["message"] = f"{state}:{reason}"
+    return result
+
+
+def _allocation_from_call(func, args, kwargs):
+    """Find the allocation a task was called for, however it was given allocation_pk."""
+    bound = inspect.signature(func).bind(*args, **kwargs)
+    bound.apply_defaults()
+    return Allocation.objects.get(id=bound.arguments["allocation_pk"])
+
+
+SHARE_CREATION_SIGNALS = {
+    ProvisionStatus.SUCCESSFUL: share_creation_successful,
+    ProvisionStatus.FAILED: share_creation_failed,
+}
+QUOTA_UPDATE_SIGNALS = {
+    ProvisionStatus.SUCCESSFUL: quota_update_successful,
+    ProvisionStatus.FAILED: quota_update_failed,
+}
+
+
+def set_share_creation_state(
+    allocation, state: ProvisionStatus, message: str = "", *, sender, result=None, exception=None
+) -> None:
+    """Record how share creation is going for an allocation, and why.
+
+    Recording successful or failed then sends share_creation_successful or share_creation_failed
+    (coldfront_utils.signals) from `sender`, the task recording it: with `result` on success (the
+    dict the task returns; built from the state when not given), and with the message and
+    `exception` on failure. Every path that reaches a final state comes through here, so they all
+    send, decorated tasks or not.
+    """
+    _set_task_state(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
+                    state, message)
+    _announce_outcome(SHARE_CREATION_SIGNALS, sender, allocation, state, message, result, exception)
+
+
+def set_quota_update_state(
+    allocation, state: ProvisionStatus, message: str = "", *, sender, result=None, exception=None
+) -> None:
+    """Record how a quota update is going for an allocation, and why.
+
+    Sends quota_update_successful or quota_update_failed on a final state; see
+    set_share_creation_state.
+    """
+    _set_task_state(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME,
+                    state, message)
+    _announce_outcome(QUOTA_UPDATE_SIGNALS, sender, allocation, state, message, result, exception)
+
+
+def _set_task_state(allocation, state_attribute_name, message_attribute_name, state: ProvisionStatus, message: str) -> None:
+    update_allocation_attribute_value(allocation, state_attribute_name, state)
+    # the message is written on every transition, including the ones with nothing to say, so that a
+    # reason can never outlive the state that it explained
+    create_allocation_attribute_type(message_attribute_name, "Text", is_private=True)
+    update_allocation_attribute_value(allocation, message_attribute_name, message)
+
+
+#: Decorate a share creation task; it records into the share creation state and message attributes.
+records_share_creation_state = _records_task_state(set_share_creation_state)
+
+#: Decorate a quota update task; it records into the quota update state and message attributes.
+records_quota_update_state = _records_task_state(set_quota_update_state)
 
 
 def get_client_config(client_key):
