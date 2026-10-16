@@ -85,21 +85,20 @@ def _records_task_state(setter):
     return decorate
 
 
-def _announce_outcome(signals, sender, allocation, state, message, result, exception) -> None:
+def _announce_outcome(successful, failed, sender, allocation, state, message, result, exception) -> None:
     """Send the outcome signal for a final state, without letting a receiver change the outcome.
 
-    `signals` maps SUCCESSFUL and FAILED to their signals; nothing is sent for started or scheduled,
-    which aren't outcomes. send_robust, not send: the state is recorded by this point, so a receiver
-    blowing up must not propagate out of the task -- have django_q record as failed something that
-    succeeded, or replace a failed task's own exception. Receiver failures are logged instead.
+    Nothing is sent for started or scheduled, which aren't outcomes. send_robust, not send: the
+    state is recorded by this point, so a receiver blowing up must not propagate out of the task --
+    have django_q record as failed something that succeeded, or replace a failed task's own
+    exception. Receiver failures are logged instead.
     """
-    signal = signals.get(state)
-    if signal is None:
-        return
     if state == ProvisionStatus.SUCCESSFUL:
-        arguments = {"result": result if result is not None else _task_result(state, message)}
+        signal, arguments = successful, {"result": result if result is not None else _task_result(state, message)}
+    elif state == ProvisionStatus.FAILED:
+        signal, arguments = failed, {"message": message, "exception": exception}
     else:
-        arguments = {"message": message, "exception": exception}
+        return
     for receiver, response in signal.send_robust(sender=sender, allocation=allocation, **arguments):
         if isinstance(response, Exception):
             logger.exception(
@@ -116,9 +115,12 @@ def _task_result(state: ProvisionStatus, reason: str, returned=None) -> dict:
     "result". "message" is reserved for the status and always wins, so that a caller can rely on
     it being present and well formed whatever the body did.
     """
-    result = dict(returned) if isinstance(returned, dict) else {}
-    if returned is not None and not isinstance(returned, dict):
-        result["result"] = returned
+    if isinstance(returned, dict):
+        result = dict(returned)
+    elif returned is not None:
+        result = {"result": returned}
+    else:
+        result = {}
     result["message"] = f"{state}:{reason}"
     return result
 
@@ -128,16 +130,6 @@ def _allocation_from_call(func, args, kwargs):
     bound = inspect.signature(func).bind(*args, **kwargs)
     bound.apply_defaults()
     return Allocation.objects.get(id=bound.arguments["allocation_pk"])
-
-
-SHARE_CREATION_SIGNALS = {
-    ProvisionStatus.SUCCESSFUL: share_creation_successful,
-    ProvisionStatus.FAILED: share_creation_failed,
-}
-QUOTA_UPDATE_SIGNALS = {
-    ProvisionStatus.SUCCESSFUL: quota_update_successful,
-    ProvisionStatus.FAILED: quota_update_failed,
-}
 
 
 def set_share_creation_state(
@@ -153,7 +145,9 @@ def set_share_creation_state(
     """
     _set_task_state(allocation, SHARE_CREATION_STATE_ATTRIBUTE_NAME, SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
                     state, message)
-    _announce_outcome(SHARE_CREATION_SIGNALS, sender, allocation, state, message, result, exception)
+    _announce_outcome(
+        share_creation_successful, share_creation_failed, sender, allocation, state, message, result, exception
+    )
 
 
 def set_quota_update_state(
@@ -166,14 +160,19 @@ def set_quota_update_state(
     """
     _set_task_state(allocation, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME, QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME,
                     state, message)
-    _announce_outcome(QUOTA_UPDATE_SIGNALS, sender, allocation, state, message, result, exception)
+    _announce_outcome(
+        quota_update_successful, quota_update_failed, sender, allocation, state, message, result, exception
+    )
 
 
 def _set_task_state(allocation, state_attribute_name, message_attribute_name, state: ProvisionStatus, message: str) -> None:
     update_allocation_attribute_value(allocation, state_attribute_name, state)
     # the message is written on every transition, including the ones with nothing to say, so that a
     # reason can never outlive the state that it explained
-    create_allocation_attribute_type(message_attribute_name, "Text", is_private=True)
+    # created on first use, so a deployment doesn't need it set up in advance; checked by name alone,
+    # one query, because create_allocation_attribute_type costs three on every transition
+    if not AllocationAttributeType.objects.filter(name=message_attribute_name).exists():
+        create_allocation_attribute_type(message_attribute_name, "Text", is_private=True)
     update_allocation_attribute_value(allocation, message_attribute_name, message)
 
 

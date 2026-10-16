@@ -3,12 +3,13 @@ from collections import defaultdict
 
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront.core.project.models import ProjectAttribute
+from coldfront.core.utils.common import Echo
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.views.generic import View
 
-STORAGE_RESOURCE_TYPE_NAME = 'Storage'
+from storage.constants import STORAGE_RESOURCE_TYPE_NAME
 
 # attributes are not necessarily unique per allocation/project, so repeated values share a cell
 MULTI_VALUE_SEPARATOR = '; '
@@ -39,13 +40,6 @@ BASE_COLUMNS = [
     'project_pi_name',
     'project_pi_email',
 ]
-
-
-class Echo:
-    """File-like object whose write() returns the value, so csv rows can be streamed."""
-
-    def write(self, value):
-        return value
 
 
 def format_datetime(value):

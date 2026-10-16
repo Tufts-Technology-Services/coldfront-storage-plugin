@@ -26,14 +26,15 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
     client_config = get_client_config(client_config_id)
     path_attr = client_config['native_path_attribute_name']
 
-    # log a warning for Allocations of this resource that are missing a native path attribute
     resource_allocations = resource.allocation_set.distinct()
-    for alloc in resource_allocations:
-        if not alloc.allocationattribute_set.filter(allocation_attribute_type__name=path_attr).exists():
-            logger.warning(f"Allocation {alloc.pk} of resource {resource.name} is missing required native path attribute '{path_attr}' and will be skipped in Starfish usage retrieval task.")
+    sf_attrs = list(AllocationAttribute.objects.filter(allocation__in=resource_allocations,
+        allocation_attribute_type__name=path_attr).select_related("allocation"))
 
-    sf_attrs = AllocationAttribute.objects.filter(allocation__in=resource_allocations,
-        allocation_attribute_type__name=path_attr).select_related("allocation")
+    # log a warning for Allocations of this resource that are missing a native path attribute
+    with_path = {attr.allocation_id for attr in sf_attrs}
+    for alloc_pk in resource_allocations.values_list("pk", flat=True):
+        if alloc_pk not in with_path:
+            logger.warning(f"Allocation {alloc_pk} of resource {resource.name} is missing required native path attribute '{path_attr}' and will be skipped in Starfish usage retrieval task.")
 
     # validate before grouping by volume, so that an invalid value can neither contribute a bogus
     # volume name to query Starfish for, nor escape being stamped by failing the grouping filter

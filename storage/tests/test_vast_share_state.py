@@ -5,56 +5,35 @@ entry point dispatched by storage.tasks.create_share, so each is responsible for
 lifecycle of SHARE_CREATION_STATE_ATTRIBUTE_NAME for its own run.
 """
 
-import sys
-import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from coldfront.core.allocation.models import AllocationAttributeType, AttributeType
 
 from storage.constants import (
-    SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     ProvisionStatus,
 )
+from storage.tests.helpers import message_of, state_of
 from storage.utils import GroupNotFoundError
 from storage.vast import course, project, vast
 
 
 @pytest.fixture
 def fake_ad_search():
-    """Stand in for coldfront_utils.util.ad_search, which needs python-ldap to import.
-
-    The callers import it lazily, so putting a stub in sys.modules is enough to satisfy them.
-    Yields the ADSearch instance the code under test will get back.
-    """
-    module = types.ModuleType("coldfront_utils.util.ad_search")
-    instance = MagicMock()
-    module.ADSearch = MagicMock(return_value=instance)
-    with patch.dict(sys.modules, {"coldfront_utils.util.ad_search": module}):
-        yield instance
+    """Stand in for AD in the course share task. Yields the ADSearch instance it will get back."""
+    with patch("storage.vast.course.ADSearch") as ad_search_class:
+        yield ad_search_class.return_value
 
 
 @pytest.fixture
-def share_state_attribute_type(db):
+def share_state_attribute_type(make_attribute_type):
     """update_allocation_attribute_value looks this type up, so it must already exist."""
-    return AllocationAttributeType.objects.get_or_create(
-        name=SHARE_CREATION_STATE_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+    return make_attribute_type(SHARE_CREATION_STATE_ATTRIBUTE_NAME)
 
 
 @pytest.fixture
 def allocation(storage_resource, make_allocation, share_state_attribute_type):
     return make_allocation(storage_resource)
-
-
-def state_of(allocation):
-    return allocation.get_attribute(SHARE_CREATION_STATE_ATTRIBUTE_NAME)
-
-
-def message_of(allocation):
-    return allocation.get_attribute(SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME)
 
 
 # --- the plain share task ----------------------------------------------------------------

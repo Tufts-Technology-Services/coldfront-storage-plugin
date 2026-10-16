@@ -5,6 +5,7 @@ from pathlib import Path
 import requests
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, ttl_cache, update_allocation_attribute_value, validate_posix_path
+from coldfront_utils.util.ad_search import ADSearch
 
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,
@@ -186,9 +187,6 @@ def provision_smb_share(native_path: str, quota_bytes: int, group: str, client_c
     """
     vc = get_vast_client(client_config_id)
     params = get_vast_params(client_config_id)
-    # imported lazily: python-ldap is only needed when actually talking to AD
-    from coldfront_utils.util.ad_search import ADSearch
-
     ad_search = ADSearch("", "")
     group_info = ad_search.get_ad_group(group)
     if not group_info:

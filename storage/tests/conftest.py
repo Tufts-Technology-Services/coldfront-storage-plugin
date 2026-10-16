@@ -56,7 +56,20 @@ def storage_resource(db):
 
 
 @pytest.fixture
-def make_allocation(db, project):
+def make_attribute_type(db):
+    """Get or create an AllocationAttributeType of attribute type Text, by name."""
+
+    def _make(name):
+        return AllocationAttributeType.objects.get_or_create(
+            name=name,
+            defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
+        )[0]
+
+    return _make
+
+
+@pytest.fixture
+def make_allocation(db, project, make_attribute_type):
     """Build an allocation on the given resources, with optional allocation attributes."""
 
     def _make(*resources, attributes=None, **kwargs):
@@ -69,10 +82,7 @@ def make_allocation(db, project):
         allocation.resources.add(*resources)
         for name, value in (attributes or {}).items():
             allocation.allocationattribute_set.create(
-                allocation_attribute_type=AllocationAttributeType.objects.get_or_create(
-                    name=name,
-                    defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-                )[0],
+                allocation_attribute_type=make_attribute_type(name),
                 value=value,
             )
         return allocation

@@ -11,7 +11,6 @@ import pytest
 from coldfront.core.allocation.models import (
     AllocationAttribute,
     AllocationAttributeType,
-    AttributeType,
 )
 from django.apps import apps as global_apps
 
@@ -22,6 +21,7 @@ from storage.constants import (
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     ProvisionStatus,
 )
+from storage.tests.helpers import message_of, state_of
 
 migration = importlib.import_module("storage.migrations.0002_backfill_provision_status")
 
@@ -70,11 +70,8 @@ def test_frozen_statuses_still_match_the_enum():
 
 
 @pytest.fixture
-def state_type(db):
-    return AllocationAttributeType.objects.get_or_create(
-        name=SHARE_CREATION_STATE_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+def state_type(make_attribute_type):
+    return make_attribute_type(SHARE_CREATION_STATE_ATTRIBUTE_NAME)
 
 
 @pytest.fixture
@@ -85,14 +82,6 @@ def run_backfill():
         migration.backfill(global_apps, None)
 
     return run
-
-
-def state_of(allocation):
-    return allocation.get_attribute(SHARE_CREATION_STATE_ATTRIBUTE_NAME)
-
-
-def message_of(allocation):
-    return allocation.get_attribute(SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME)
 
 
 @pytest.fixture
@@ -152,14 +141,11 @@ def test_backfill_leaves_unrecognised_values_untouched(allocation_with_state, ru
 
 
 def test_backfill_does_not_clear_a_message_the_tasks_wrote(
-    allocation_with_state, run_backfill, db
+    allocation_with_state, run_backfill, make_attribute_type
 ):
     """A row already in the new format keeps its reason."""
     allocation = allocation_with_state(str(ProvisionStatus.FAILED))
-    message_type = AllocationAttributeType.objects.get_or_create(
-        name=SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+    message_type = make_attribute_type(SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME)
     AllocationAttribute.objects.create(
         allocation=allocation, allocation_attribute_type=message_type, value="VAST exploded"
     )
@@ -200,11 +186,8 @@ def test_backfill_truncates_a_reason_that_would_not_fit(allocation_with_state, r
     assert len(message_of(allocation)) == 128
 
 
-def test_backfill_covers_quota_update_as_well(storage_resource, make_allocation, run_backfill, db):
-    quota_state_type = AllocationAttributeType.objects.get_or_create(
-        name=QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+def test_backfill_covers_quota_update_as_well(storage_resource, make_allocation, run_backfill, make_attribute_type):
+    quota_state_type = make_attribute_type(QUOTA_UPDATE_STATE_ATTRIBUTE_NAME)
     allocation = make_allocation(storage_resource)
     AllocationAttribute.objects.create(
         allocation=allocation,

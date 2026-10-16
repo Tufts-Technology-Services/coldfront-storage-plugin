@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from coldfront.core.allocation.models import AllocationAttributeType, AttributeType
 from django.core.cache import cache
 
 from storage import starfish
@@ -74,12 +73,9 @@ def test_get_starfish_usage_data_by_volume_is_cached(mock_get_client_config):
 
 
 @pytest.fixture
-def usage_match_attribute_type(db):
+def usage_match_attribute_type(make_attribute_type):
     """get_storage_usage_batch stamps this attribute, which must already exist."""
-    return AllocationAttributeType.objects.get_or_create(
-        name=USAGE_MATCH_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+    return make_attribute_type(USAGE_MATCH_ATTRIBUTE_NAME)
 
 
 @patch("storage.starfish.update_allocation_usage")

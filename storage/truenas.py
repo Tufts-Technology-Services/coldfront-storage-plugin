@@ -3,6 +3,7 @@ import logging
 
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
+from coldfront_utils.util.ad_search import ADSearch
 from django_q.tasks import Schedule, schedule
 
 from .constants import (
@@ -20,7 +21,6 @@ from .utils import (
     get_client_config,
     records_quota_update_state,
     records_share_creation_state,
-    update_allocation_attribute_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,9 +105,6 @@ def provision_share(native_path: str, quota_bytes: int, owner: str, group: str, 
         return
 
     logger.info(f"creating/updating share on tier2 for path {truenas_path} with quota {quota_bytes / 10**12} TB...")
-    # imported lazily: python-ldap is only needed when actually talking to AD
-    from coldfront_utils.util.ad_search import ADSearch
-
     # get uid, gid, and quota for this allocation
     ad_search = ADSearch("", "")
     owner_results = ad_search.get_ad_user(owner)

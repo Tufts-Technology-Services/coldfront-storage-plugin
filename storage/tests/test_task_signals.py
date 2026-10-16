@@ -1,12 +1,11 @@
 """Recording a final state sends the matching outcome signal from coldfront_utils.signals, whichever
 path recorded it: a decorated task, or the dispatch tasks in storage.tasks."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from coldfront.core.allocation.models import AllocationAttributeType, AttributeType
 from coldfront_utils.signals import (
     quota_update_failed,
     quota_update_successful,
@@ -33,12 +32,9 @@ ALL_SIGNALS = (share_creation_successful, share_creation_failed, quota_update_su
 
 
 @pytest.fixture
-def state_attribute_types(db):
+def state_attribute_types(make_attribute_type):
     for name in (SHARE_CREATION_STATE_ATTRIBUTE_NAME, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME):
-        AllocationAttributeType.objects.get_or_create(
-            name=name,
-            defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-        )
+        make_attribute_type(name)
 
 
 @pytest.fixture
@@ -47,46 +43,27 @@ def allocation(storage_resource, make_allocation, state_attribute_types):
 
 
 @contextmanager
+def connected(signal, receiver, sender=None):
+    signal.connect(receiver, sender=sender, weak=False)
+    try:
+        yield
+    finally:
+        signal.disconnect(receiver, sender=sender)
+
+
+@contextmanager
 def listening(signal, sender=None):
     """Collect everything a signal sends while the block runs."""
     received = []
-
-    def listener(sender, **kwargs):
-        received.append({"sender": sender, **kwargs})
-
-    signal.connect(listener, sender=sender, weak=False)
-    try:
+    with connected(signal, lambda sender, **kwargs: received.append({"sender": sender, **kwargs}), sender):
         yield received
-    finally:
-        signal.disconnect(listener, sender=sender)
 
 
 @contextmanager
 def listening_to_all():
     """Collect what each of the four outcome signals sends, keyed by signal."""
-    received = {signal: [] for signal in ALL_SIGNALS}
-    listeners = {}
-    for signal in ALL_SIGNALS:
-
-        def listener(sender, _signal=signal, **kwargs):
-            received[_signal].append({"sender": sender, **kwargs})
-
-        listeners[signal] = listener
-        signal.connect(listener, weak=False)
-    try:
-        yield received
-    finally:
-        for signal, listener in listeners.items():
-            signal.disconnect(listener)
-
-
-@contextmanager
-def connected(signal, receiver):
-    signal.connect(receiver, weak=False)
-    try:
-        yield
-    finally:
-        signal.disconnect(receiver)
+    with ExitStack() as stack:
+        yield {signal: stack.enter_context(listening(signal)) for signal in ALL_SIGNALS}
 
 
 def exploding(sender, **kwargs):
@@ -300,12 +277,9 @@ def dispatchable(storage_resource, make_allocation, state_attribute_types):
 
 
 @patch("storage.tasks.STORAGE_LOG_ONLY", False)  # it defaults to on, which returns before queueing
-def test_create_share_hands_the_share_task_the_share_client(dispatchable):
+def test_create_share_hands_the_share_task_the_share_client(dispatchable, make_attribute_type):
     """Not the quota client: the share is created through the client its handler names for creation."""
-    AllocationAttributeType.objects.get_or_create(
-        name=SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )
+    make_attribute_type(SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME)
 
     with patch("storage.tasks.async_task", return_value="task-1") as queued:
         tasks.create_share(dispatchable.pk)

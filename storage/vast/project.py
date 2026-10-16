@@ -2,6 +2,7 @@ import datetime
 import logging
 from pathlib import Path
 
+from coldfront_utils.util.ad_search import ADSearch
 from django_q.tasks import Schedule, schedule
 
 from storage.directory_structure.tasks import create_project_folders
@@ -79,9 +80,6 @@ def create_project_share(
 
 
 def create_project_share_file_structure(native_path: str, owner: str, group: str, client_config_id: str):
-    # imported lazily: python-ldap is only needed when actually talking to AD
-    from coldfront_utils.util.ad_search import ADSearch
-
     ad_search = ADSearch("", "")
 
     owner_results = ad_search.get_ad_user(owner)

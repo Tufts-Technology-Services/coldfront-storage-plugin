@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from coldfront.core.allocation.models import Allocation
+from coldfront_utils.util.ad_search import ADSearch
 from django_q.tasks import Schedule, schedule
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME
@@ -29,9 +30,6 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
         logger.error(f"No cluster path found for allocation {allocation_pk}")
         raise ValueError(f"No cluster path found for allocation {allocation_pk}")
     members = allocation.allocationuser_set.filter(status__name="Active").values_list("user__username", flat=True)
-    # imported lazily: python-ldap is only needed when actually talking to AD
-    from coldfront_utils.util.ad_search import ADSearch
-
     ad_search = ADSearch("", "")
     group_results = ad_search.get_ad_group(group)
     if not group_results or group_results.get("gidNumber", []) == []:

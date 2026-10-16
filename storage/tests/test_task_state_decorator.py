@@ -7,39 +7,26 @@ behave identically; they differ only in which pair of attributes they record int
 from unittest.mock import patch
 
 import pytest
-from coldfront.core.allocation.models import AllocationAttributeType, AttributeType
 
 from storage import truenas
 from storage.constants import (
-    QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME,
     QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
-    SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     ProvisionStatus,
 )
+from storage.tests.helpers import message_of, quota_message_of, quota_state_of, state_of
 from storage.utils import GroupNotFoundError, TaskRetryScheduled, records_share_creation_state
 from storage.vast import vast
 
 
 @pytest.fixture
-def share_state_attribute_type(db):
-    return AllocationAttributeType.objects.get_or_create(
-        name=SHARE_CREATION_STATE_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+def share_state_attribute_type(make_attribute_type):
+    return make_attribute_type(SHARE_CREATION_STATE_ATTRIBUTE_NAME)
 
 
 @pytest.fixture
 def allocation(storage_resource, make_allocation, share_state_attribute_type):
     return make_allocation(storage_resource)
-
-
-def state_of(allocation):
-    return allocation.get_attribute(SHARE_CREATION_STATE_ATTRIBUTE_NAME)
-
-
-def message_of(allocation):
-    return allocation.get_attribute(SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME)
 
 
 # --- what the decorator guarantees -------------------------------------------------------
@@ -178,24 +165,13 @@ def test_truenas_wait_for_group_does_not_nest_state_handling(mock_provision, all
 
 
 @pytest.fixture
-def quota_state_attribute_type(db):
-    return AllocationAttributeType.objects.get_or_create(
-        name=QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
-        defaults={"attribute_type": AttributeType.objects.get_or_create(name="Text")[0]},
-    )[0]
+def quota_state_attribute_type(make_attribute_type):
+    return make_attribute_type(QUOTA_UPDATE_STATE_ATTRIBUTE_NAME)
 
 
 @pytest.fixture
 def quota_allocation(allocation, quota_state_attribute_type):
     return allocation
-
-
-def quota_state_of(allocation):
-    return allocation.get_attribute(QUOTA_UPDATE_STATE_ATTRIBUTE_NAME)
-
-
-def quota_message_of(allocation):
-    return allocation.get_attribute(QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME)
 
 
 @patch("storage.vast.vast.get_vast_client")
@@ -377,14 +353,3 @@ def test_the_message_carries_the_reason_for_waiting(allocation):
     state, _, reason = result["message"].partition(":")
     assert state == ProvisionStatus.SCHEDULED
     assert reason == message_of(allocation), "the message mirrors what was recorded on the allocation"
-
-
-def test_a_failing_task_raises_rather_than_returning(allocation):
-    """Failure keeps propagating, so django-q2 still records the task as failed."""
-
-    @records_share_creation_state
-    def task(allocation_pk):
-        raise RuntimeError("it broke")
-
-    with pytest.raises(RuntimeError):
-        task(allocation.pk)

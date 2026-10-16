@@ -10,6 +10,7 @@ from storage.constants import (
     SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
     STORAGE_LOG_ONLY,
     STORAGE_PLUGIN_STORAGE_UNITS,
+    STORAGE_RESOURCE_TYPE_NAME,
     ProvisionStatus,
 )
 from storage.directory_structure.tasks import create_folders
@@ -207,7 +208,7 @@ def create_directory(allocation_pk: int, structure_type: str):
 
 
 def get_storage_handler(allocation):
-    resources = allocation.resources.filter(resource_type__name="Storage")
+    resources = allocation.resources.filter(resource_type__name=STORAGE_RESOURCE_TYPE_NAME)
     if resources.count() != 1:
         logger.warning(
             f"Allocation {allocation.pk} is associated with {resources.count()} storage resources. Expected exactly 1. Cannot determine which resource to use to get storage handler."
