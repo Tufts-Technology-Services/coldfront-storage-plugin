@@ -1,12 +1,12 @@
-from datetime import datetime
 import logging
+from datetime import datetime
 
 from coldfront.core.allocation.models import AllocationAttribute
 from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, update_allocation_attribute_value
 
 from storage.constants import USAGE_MATCH_ATTRIBUTE_NAME
-from storage.utils import update_allocation_usage, get_client_config
+from storage.utils import get_client_config, update_allocation_usage
 
 logger = logging.getLogger(__name__)
 
@@ -24,38 +24,36 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
     """
     resource = Resource.objects.get(id=resource_id)
     client_config = get_client_config(client_config_id)
-    # to take full advantage of caching, we need to group by volume
     path_attr = client_config['native_path_attribute_name']
 
-    # log a warning for Allocations of this resource that are missing a native path attribute 
+    # log a warning for Allocations of this resource that are missing a native path attribute
     resource_allocations = resource.allocation_set.distinct()
     for alloc in resource_allocations:
         if not alloc.allocationattribute_set.filter(allocation_attribute_type__name=path_attr).exists():
             logger.warning(f"Allocation {alloc.pk} of resource {resource.name} is missing required native path attribute '{path_attr}' and will be skipped in Starfish usage retrieval task.")
-        else:
-            # check value of native path attribute and log a warning if it does not match expected format of "volume_name:path/to/subfolder"
-            native_path_value = alloc.allocationattribute_set.filter(allocation_attribute_type__name=path_attr).first().value
-            try:
-                validate_starfish_path(native_path_value)
-            except ValueError as e:
-                logger.warning(f"Allocation {alloc.pk} of resource {resource.name} has native path attribute value '{native_path_value}' that is invalid: {e}. This allocation will be skipped in Starfish usage retrieval task.")
 
-    # now filter to only include allocations with valid native path attributes
     sf_attrs = AllocationAttribute.objects.filter(allocation__in=resource_allocations,
-        allocation_attribute_type__name=path_attr)
-    # get a set of all unique volumes
-    volumes = set(i.split(':')[0] for i in sf_attrs.values_list("value", flat=True).distinct())
+        allocation_attribute_type__name=path_attr).select_related("allocation")
+
+    # validate before grouping by volume, so that an invalid value can neither contribute a bogus
+    # volume name to query Starfish for, nor escape being stamped by failing the grouping filter
+    valid_attrs = []
+    for attr in sf_attrs:
+        try:
+            validate_starfish_path(attr.value)
+        except ValueError as e:
+            logger.warning(f"Skipping allocation {attr.allocation.pk} with invalid Starfish path '{attr.value}': {e}")
+            update_allocation_attribute_value(attr.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
+        else:
+            valid_attrs.append(attr)
+
+    # to take full advantage of caching, we need to group by volume
+    volumes = set(attr.value.split(':')[0] for attr in valid_attrs)
 
     for vol in volumes:
-        vol_attributes = sf_attrs.filter(value__startswith=f"{vol}:")
+        vol_attributes = [attr for attr in valid_attrs if attr.value.startswith(f"{vol}:")]
         volume_data = get_starfish_usage_data_by_volume(vol, client_config_id)
         for vol_path in vol_attributes:
-            try:
-                validate_starfish_path(vol_path.value)
-            except ValueError as e:
-                logger.warning(f"Skipping allocation {vol_path.allocation.pk} with invalid Starfish path '{vol_path.value}': {e}")
-                update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
-                continue
             usage, _ = get_path_usage_data(volume_data, vol_path.value)
             if usage is not None:
                 report_date = datetime.now()
@@ -75,7 +73,7 @@ def get_starfish_usage_data_by_volume(volume: str, client_key: str) -> list:
     Helper function to query Starfish API for usage data for all subfolders of a given volume. 
     Caches results to avoid redundant API calls.
     """
-    from starfish_api_client import StarfishAPIClient # pylint: ignore=import-outside-toplevel
+    from starfish_api_client import StarfishAPIClient  # pylint: ignore=import-outside-toplevel
     client_config = get_client_config(client_key)
     sf = StarfishAPIClient(host=client_config['host'], token=client_config['api_key'])
     subfolder_response = sf.request_subfolder_query(volume)
