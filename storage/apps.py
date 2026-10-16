@@ -1,6 +1,7 @@
 import logging
 
 from django.apps import AppConfig, apps
+
 from .constants import ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ class StorageConfig(AppConfig):
         # Override allocation create view so users specify quota when requesting storage
         import coldfront.core.allocation.views as allocation_views
 
-        from storage.views import AllocationCreateView, AllocationAttributeEditView
+        from storage.views import AllocationAttributeEditView, AllocationCreateView
 
         allocation_views.AllocationCreateView = AllocationCreateView
         allocation_views.AllocationAttributeEditView = AllocationAttributeEditView

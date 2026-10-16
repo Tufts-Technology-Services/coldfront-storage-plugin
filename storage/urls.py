@@ -7,5 +7,10 @@ urlpatterns = [
         'allocation/<int:pk>/storage-request-details/',
         views.StorageAllocationRequestDetailsView.as_view(),
         name='storage-allocation-request-details',
-    )
+    ),
+    path(
+        'allocation/export/',
+        views.StorageAllocationExportView.as_view(),
+        name='storage-allocation-export',
+    ),
 ]
