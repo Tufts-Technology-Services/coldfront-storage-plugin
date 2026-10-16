@@ -8,7 +8,6 @@ from coldfront.core.allocation.models import Allocation, AllocationAttributeType
 from coldfront.core.project.models import ProjectAttribute
 from coldfront.core.resource.models import ResourceAttribute
 from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
-from coldfront_utils.attribute.attribute import create_allocation_attribute_type
 from coldfront_utils.signals import (
     quota_update_failed,
     quota_update_successful,
@@ -169,10 +168,6 @@ def _set_task_state(allocation, state_attribute_name, message_attribute_name, st
     update_allocation_attribute_value(allocation, state_attribute_name, state)
     # the message is written on every transition, including the ones with nothing to say, so that a
     # reason can never outlive the state that it explained
-    # created on first use, so a deployment doesn't need it set up in advance; checked by name alone,
-    # one query, because create_allocation_attribute_type costs three on every transition
-    if not AllocationAttributeType.objects.filter(name=message_attribute_name).exists():
-        create_allocation_attribute_type(message_attribute_name, "Text", is_private=True)
     update_allocation_attribute_value(allocation, message_attribute_name, message)
 
 

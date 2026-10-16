@@ -167,8 +167,9 @@ def test_backfill_is_idempotent(allocation_with_state, run_backfill):
 
 
 def test_backfill_creates_the_message_attribute_type(allocation_with_state, run_backfill):
+    """0002 runs before 0003 creates the message types, so it has to be able to make its own."""
     allocation_with_state("failed: missing information")
-    assert not AllocationAttributeType.objects.filter(name=SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME).exists()
+    AllocationAttributeType.objects.filter(name=SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME).delete()
 
     run_backfill()
 

@@ -74,6 +74,10 @@ attributes from the free-form strings earlier versions wrote (`success`, `pendin
 `failed: missing information`) to a `ProvisionStatus` value plus a separate message attribute. It
 prints what it converted, and reports any value it did not recognise rather than overwriting it.
 
+`storage.0003_create_task_attribute_types` creates the allocation attribute types the tasks record
+into, as private Text types: the task id, state and message, for share creation and for quota
+updates. A type that already exists under the name is left as it is.
+
 6. Create a Resource of type 'Storage' that corresponds to your storage system. Your resource should be a unique combination of storage system parameters.
 
 7. Create a StorageHandler that corresponds to the Resource you just created and configure it with the appropriate client IDs for usage, quota, and creation. 
@@ -216,8 +220,8 @@ Two rules follow, and the tests enforce both:
   run. Share provisioning is therefore factored into undecorated `provision_share()` actions that
   record no state, which tasks compose freely.
 
-The message attribute types are created on demand, so an existing deployment does not need them set
-up in advance.
+The attribute types these tasks write (task id, state and message) are created by migration
+`storage.0003_create_task_attribute_types`, so a deployment does not need them set up in advance.
 
 ## Running the tests
 
