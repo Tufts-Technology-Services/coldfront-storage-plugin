@@ -48,15 +48,31 @@ QUOTA_REPORT_DATE_ATTRIBUTE_NAME=quota_report_date  # name of the allocation att
 USAGE_IN_BYTES_ATTRIBUTE_NAME=usage_in_bytes  # name of the allocation attribute that holds the current storage usage in bytes
 USAGE_REPORT_DATE_ATTRIBUTE_NAME=usage_report_date  # name of the allocation attribute that holds the date when the usage was last updated
 GROUP_ATTRIBUTE_NAME=Group  # name of the group attribute that holds your unix group name
+SHARE_CREATION_STATE_ATTRIBUTE_NAME=share_creation_state  # name of the allocation attribute that holds the share creation state (one of the ProvisionStatus values)
+SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME=share_creation_message  # name of the allocation attribute that holds the reason for the current share creation state
+QUOTA_UPDATE_STATE_ATTRIBUTE_NAME=quota_update_state  # name of the allocation attribute that holds the quota update state (one of the ProvisionStatus values)
+QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME=quota_update_message  # name of the allocation attribute that holds the reason for the current quota update state
 STORAGE_LOG_ONLY=True  # if True, the plugin will only log actions instead of performing them (for testing purposes)
 ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION=False  # if True, the plugin will add the necessary storage attributes to new allocations based on the storage client configuration
 
 ```
 5. Run migrations to create the necessary database tables for the plugin:
 ```bash
-uv run coldfront makemigrations
 uv run coldfront migrate
 ```
+
+The plugin ships its own migrations, so there is no need to run `makemigrations` for it. If you are
+upgrading a deployment that predates them, its `storage` tables already exist and were created from
+a locally generated migration, so run the first one as already applied:
+
+```bash
+uv run coldfront migrate storage --fake-initial
+```
+
+`storage.0002_backfill_provision_status` then converts the share creation and quota update state
+attributes from the free-form strings earlier versions wrote (`success`, `pending`,
+`failed: missing information`) to a `ProvisionStatus` value plus a separate message attribute. It
+prints what it converted, and reports any value it did not recognise rather than overwriting it.
 
 6. Create a Resource of type 'Storage' that corresponds to your storage system. Your resource should be a unique combination of storage system parameters.
 
@@ -87,6 +103,137 @@ STORAGE_PLUGIN_CLIENTS = {
     } 
 }
 ```
+
+## Storage Allocation Export
+Superusers can download a CSV of every allocation on a Resource whose resource type is `Storage` at:
+
+```
+/storage/allocation/export/
+```
+
+Each row is one allocation. Alongside the allocation and project fields, the CSV has one column per
+allocation attribute type (`allocation_attribute: <name>`) and one per project attribute type
+(`project_attribute: <name>`) in use across those allocations. Attributes that are not set on a given
+allocation are left blank, and an attribute type with more than one value on the same allocation has
+its values joined with `; `. Because the export is restricted to superusers, private attributes are
+included.
+
+Non-superusers receive a 403; anonymous users are redirected to the login page.
+
+## Task state
+
+Share creation and quota update tasks each record how they are going on the allocation, as a pair
+of attributes: a state and a message. The state is always one of the `ProvisionStatus` values in
+`storage/constants.py`, so it can be filtered and counted on. Why the task is in that state goes in
+the message attribute instead, which is rewritten on every transition so a reason never outlives
+the state it explained.
+
+A task records `started` on entry, then exactly one of the other three. There are no statuses
+beyond these four, and every one of them is reachable:
+
+| status | when |
+|---|---|
+| `started` | the decorator has entered the task body |
+| `successful` | the body returned |
+| `failed` | the body raised, with the exception as the message |
+| `scheduled` | the body scheduled its own retry, via `TaskRetryScheduled` |
+
+This is a property of the allocation, not of the queue. It says whether the allocation has its
+share or its quota, and it outlives the task that did the work — the Django Q task record is where
+to look for the run itself.
+
+Tasks do not write either attribute themselves. The transitions above are made for them by one of
+the two decorators in `storage/utils.py` — `@records_share_creation_state` or
+`@records_quota_update_state`. So a task body only has to do the work and signal what happened: it
+cannot forget a transition or leave an allocation parked in `started`. Note that `scheduled` does
+not re-raise, since a scheduled retry is not a failure.
+
+Both come from the same `_records_task_state()` factory and behave identically. They differ only in
+which pair of attributes they record into, which is why there are two of them rather than one: a
+quota update must not overwrite the allocation's share creation state.
+
+Every decorated task returns a dict carrying a `message` of `"<state>:<reason>"`, so the outcome
+is readable from the Django Q task list and not only from the allocation:
+
+```python
+{"message": "successful:"}
+{"message": "scheduled:Could not find group with GID 'g' in AD"}
+```
+
+If the task body returns a dict of its own, its keys are carried through alongside `message`; any
+other return value is kept under `result`. `message` is reserved and always wins, so a caller can
+rely on it. A task that fails still raises rather than returning, which is what keeps django-q2
+recording it as a failed task — its reason goes to the task's traceback and to the allocation's
+message attribute.
+
+### Reacting to a task's outcome
+
+Recording `successful` or `failed` sends an outcome signal. The four signals are defined in
+coldfront-utils (`coldfront_utils.signals`), so other plugins can receive them without depending on
+this one:
+
+| state | share creation | quota update | arguments |
+|---|---|---|---|
+| `successful` | `share_creation_successful` | `quota_update_successful` | `allocation`, `result` |
+| `failed` | `share_creation_failed` | `quota_update_failed` | `allocation`, `message`, `exception` |
+
+`result` is the dict the task returns (`{"message": "successful:"}` when it returns nothing of its
+own). `message` is the reason recorded in the message attribute, and `exception` is the exception
+the task raised, or `None` for a failure recorded without one (no task or client configured).
+
+The signals are sent by `set_share_creation_state()` and `set_quota_update_state()`, the functions
+that record the state, so every path that records an outcome sends one: the decorated tasks, and
+the dispatch tasks in `storage/tasks.py` (`create_share`, `set_storage_quota`) when they fail before
+handing over or, with `STORAGE_LOG_ONLY`, report success without doing anything. Both setters take a
+keyword-only `sender`: the task recording the state, which is the decorated function for a
+decorated task. So a receiver can subscribe to one task or to all of them:
+
+```python
+from coldfront_utils.signals import share_creation_failed, share_creation_successful
+from django.dispatch import receiver
+from storage.vast import create_project_share
+
+@receiver(share_creation_successful, sender=create_project_share)
+def announce(sender, allocation, result, **kwargs):
+    ...  # result is the dict the task returned
+
+@receiver(share_creation_failed)  # every share creation task
+def report(sender, allocation, message, exception, **kwargs):
+    ...
+```
+
+A signal is sent after its state has been recorded, so a receiver sees the allocation as the task
+left it. It is sent with `send_robust()`: a receiver that raises is logged rather than allowed to
+propagate, so it can neither have django-q2 record a successful task as failed nor replace a failed
+task's own exception. One failing receiver does not stop the others.
+
+Nothing is sent for `started` or `scheduled` — a retry is not a completion.
+
+Two rules follow, and the tests enforce both:
+
+- A decorated task must take `allocation_pk`, by either position or keyword.
+- A decorated task must never call another decorated task, or both would record state for the same
+  run. Share provisioning is therefore factored into undecorated `provision_share()` actions that
+  record no state, which tasks compose freely.
+
+The message attribute types are created on demand, so an existing deployment does not need them set
+up in advance.
+
+## Running the tests
+
+```bash
+uv sync --all-extras
+uv run pytest
+```
+
+The suite runs against ColdFront's own settings with an in-memory SQLite database, so it needs no
+running services. `storage/tests/settings.py` holds the test settings and `storage/tests/urls.py`
+mounts the plugin's URLs where a deployment's `local_urls.py` mounts them; both are wired up in
+`[tool.pytest.ini_options]`. Shared model fixtures live in `storage/tests/conftest.py`.
+
+Note that `ADSearch` is imported inside the functions that use it rather than at module level, so
+the plugin can be imported without `python-ldap` (which ships as an sdist only and needs OpenLDAP
+headers to build). Keep it that way, or the test suite will stop running anywhere without LDAP.
 
 ## Additional Information
 ## Relevant Signals
