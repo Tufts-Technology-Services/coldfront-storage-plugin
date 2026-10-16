@@ -22,7 +22,8 @@ classifiers = [
     'Topic :: Internet :: WWW/HTTP :: WSGI :: Application',
 ]
 dependencies = [
-    "coldfront",
+    # 1.1.8 is the first release with AllocationAttributeEditView, which storage.views subclasses
+    "coldfront>=1.1.8",
     "coldfront_utils@git+https://github.com/Tufts-Technology-Services/coldfront-utils.git",
 ]
 
@@ -48,9 +49,12 @@ pyinfra = [
 
 [dependency-groups]
 dev = [
-    "pytest-django>=4.11.1",
-    "reuse>=5.0.2",
-    "ruff>=0.11.4",
+    "pre-commit",
+    "ruff",
+    "pytest",
+    "pytest-django",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -64,6 +68,12 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "storage.tests.settings"
+testpaths = ["storage/tests"]
+python_files = ["test_*.py"]
+addopts = "--strict-markers"
 
 [tool.ruff]
 line-length = 120
