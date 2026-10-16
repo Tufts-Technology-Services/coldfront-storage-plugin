@@ -11,7 +11,7 @@ from .constants import (
     STORAGE_PLUGIN_STORAGE_UNITS,
 )
 from .utils import (
-    ActiveDirectoryNotFoundError,
+    ActiveDirectoryNotReadyError,
     TaskRetryScheduled,
     get_client_config,
     lookup_ad_entries,
@@ -131,7 +131,7 @@ def create_share_wait_for_group(
     try:
         # the action, not the create_share task: nesting the tasks would nest their state handling
         provision_share(native_path, quota_bytes, owner, group, client_config_id)
-    except ActiveDirectoryNotFoundError as e:
+    except ActiveDirectoryNotReadyError as e:
         schedule_retry(
             create_share_wait_for_group,
             e,

@@ -13,7 +13,7 @@ from storage.constants import (
     STORAGE_PLUGIN_STORAGE_UNITS,
 )
 from storage.utils import (
-    ActiveDirectoryNotFoundError,
+    ActiveDirectoryNotReadyError,
     TaskRetryScheduled,
     get_client_config,
     lookup_ad_entries,
@@ -188,11 +188,11 @@ def create_smb_share(
     """Task entry point: provision an SMB share. The decorator records the outcome.
 
     Waits for the group to reach AD, as the NFS share tasks do: it is retried every `wait` minutes,
-    up to `retries` times, while the group or its GID isn't there yet.
+    up to `retries` times, while the group isn't there yet or AD can't be reached.
     """
     try:
         provision_smb_share(native_path, quota_bytes, group, client_config_id)
-    except ActiveDirectoryNotFoundError as e:
+    except ActiveDirectoryNotReadyError as e:
         schedule_retry(
             create_smb_share,
             e,
@@ -215,7 +215,8 @@ def provision_smb_share(native_path: str, quota_bytes: int, group: str, client_c
     """
     vc = get_vast_client(client_config_id)
     params = get_vast_params(client_config_id)
-    _, group_info = lookup_ad_entries(group=group)
+    # RStore's groups are SMB-only, with no POSIX gid: only the group itself must exist
+    _, group_info = lookup_ad_entries(group=group, require_gid=False)
     if not native_path or not quota_bytes:
         raise ValueError(
             "Missing a VAST Path attribute or quota attribute. Cannot create share without these attributes."
@@ -239,7 +240,7 @@ def provision_smb_share(native_path: str, quota_bytes: int, group: str, client_c
                     "perm": "FULL",
                     "grantee": "groups",
                     "sid_str": group_info.get("objectSid")[0],
-                    "uid_or_gid": group_info.get("gidNumber", [None])[0],
+                    "uid_or_gid": (group_info.get("gidNumber") or [None])[0],
                 }
             )
         )

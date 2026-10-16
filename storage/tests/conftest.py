@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from coldfront.core.allocation.models import (
     Allocation,
@@ -15,6 +17,17 @@ from coldfront.core.project.models import (
 )
 from coldfront.core.resource.models import Resource, ResourceType
 from django.contrib.auth.models import User
+
+
+@pytest.fixture(autouse=True)
+def ad_search():
+    """Stand in for AD everywhere, so no test can reach a real directory. By default every user and
+    group exists with its ids; a test makes one missing by changing get_ad_user/get_ad_group."""
+    with patch("storage.utils.ADSearch") as ad_search_class:
+        instance = ad_search_class.return_value
+        instance.get_ad_user.return_value = {"uidNumber": [1000]}
+        instance.get_ad_group.return_value = {"gidNumber": [2000], "objectSid": ["S-1-5-21-1"]}
+        yield instance
 
 
 @pytest.fixture

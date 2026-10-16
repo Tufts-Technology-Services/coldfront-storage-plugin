@@ -3,7 +3,7 @@ from pathlib import Path
 
 from storage.directory_structure.tasks import create_project_folders
 from storage.utils import (
-    ActiveDirectoryNotFoundError,
+    ActiveDirectoryNotReadyError,
     TaskRetryScheduled,
     lookup_ad_entries,
     records_share_creation_state,
@@ -40,6 +40,8 @@ def create_project_share(
         allocation_pk (int): The allocation primary key, used for logging and tracking purposes
     """
     try:
+        # before any VAST calls, so waiting for AD doesn't repeat them on every retry
+        lookup_ad_entries(owner, group)
         provision_share(
             native_path=native_path.lower(),
             quota_bytes=quota_bytes,
@@ -49,7 +51,7 @@ def create_project_share(
         create_project_share_file_structure(
             native_path=native_path, owner=owner, group=group, client_config_id=client_config_id
         )
-    except (ActiveDirectoryNotFoundError, VastViewNotFoundError) as e:
+    except (ActiveDirectoryNotReadyError, VastViewNotFoundError) as e:
         schedule_retry(
             create_project_share,
             e,
@@ -66,8 +68,7 @@ def create_project_share(
 
 
 def create_project_share_file_structure(native_path: str, owner: str, group: str, client_config_id: str):
-    lookup_ad_entries(owner, group)
-
+    """Create the project's folders on the cluster. The caller has checked owner and group in AD."""
     cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
 
     create_project_folders(cluster_path, owner=owner, group=group, members=[])

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from storage.directory_structure.tasks import create_course_folders
 from storage.utils import (
-    ActiveDirectoryNotFoundError,
+    ActiveDirectoryNotReadyError,
     TaskRetryScheduled,
     lookup_ad_entries,
     records_share_creation_state,
@@ -42,18 +42,18 @@ def create_course_share(
     """
 
     try:
+        # before any VAST calls, so waiting for AD doesn't repeat them on every retry
+        lookup_ad_entries(owner, group)
         provision_share(
             native_path=native_path.lower(),
             quota_bytes=quota_bytes,
             client_config_id=client_config_id,
         )
-
-        lookup_ad_entries(owner, group)
         check_folder(native_path, client_config_id=client_config_id)
         cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
         create_course_folders(cluster_path=cluster_path, owner=owner, group=group, members=[])
 
-    except (ActiveDirectoryNotFoundError, VastViewNotFoundError) as e:
+    except (ActiveDirectoryNotReadyError, VastViewNotFoundError) as e:
         schedule_retry(
             create_course_share,
             e,

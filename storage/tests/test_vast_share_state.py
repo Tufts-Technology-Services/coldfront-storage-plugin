@@ -19,10 +19,9 @@ from storage.vast import course, project, vast
 
 
 @pytest.fixture
-def fake_ad_search():
-    """Stand in for AD in lookup_ad_entries. Yields the ADSearch instance it will get back."""
-    with patch("storage.utils.ADSearch") as ad_search_class:
-        yield ad_search_class.return_value
+def fake_ad_search(ad_search):
+    """conftest's stand-in ADSearch instance, which lookup_ad_entries gets."""
+    return ad_search
 
 
 @pytest.fixture

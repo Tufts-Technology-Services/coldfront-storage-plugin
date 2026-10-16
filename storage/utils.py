@@ -2,12 +2,14 @@ import functools
 import inspect
 import logging
 import re
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
 from coldfront.core.project.models import ProjectAttribute
 from coldfront.core.resource.models import ResourceAttribute
 from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
+from coldfront_utils.attribute.attribute import create_allocation_attribute_type
 from coldfront_utils.signals import (
     quota_update_failed,
     quota_update_successful,
@@ -17,6 +19,14 @@ from coldfront_utils.signals import (
 from coldfront_utils.util.ad_search import ADSearch
 from django.conf import settings
 from django_q.tasks import Schedule, schedule
+from ldap3.core.exceptions import (
+    LDAPBindError,
+    LDAPCommunicationError,
+    LDAPException,
+    LDAPResponseTimeoutError,
+    LDAPServerPoolExhaustedError,
+    LDAPStartTLSError,
+)
 
 from .constants import (
     GROUP_ATTRIBUTE_NAME,
@@ -167,10 +177,25 @@ def set_quota_update_state(
 
 
 def _set_task_state(allocation, state_attribute_name, message_attribute_name, state: ProvisionStatus, message: str) -> None:
-    update_allocation_attribute_value(allocation, state_attribute_name, state)
+    _write_task_attribute(allocation, state_attribute_name, state)
     # the message is written on every transition, including the ones with nothing to say, so that a
     # reason can never outlive the state that it explained
-    update_allocation_attribute_value(allocation, message_attribute_name, message)
+    _write_task_attribute(allocation, message_attribute_name, message)
+
+
+def _write_task_attribute(allocation, attribute_name, value) -> None:
+    """Write a task's state or message, creating its attribute type if it has gone missing.
+
+    Migration 0003 creates these types, but under the names configured when it ran: one renamed
+    through the environment since, or deleted, would otherwise fail every write. In the decorator's
+    failure path that error would replace the task's own. Costs nothing while the type exists.
+    """
+    try:
+        update_allocation_attribute_value(allocation, attribute_name, value)
+    except AllocationAttributeType.DoesNotExist:
+        logger.warning(f"Allocation attribute type {attribute_name!r} is missing; creating it")
+        create_allocation_attribute_type(attribute_name, "Text", is_private=True)
+        update_allocation_attribute_value(allocation, attribute_name, value)
 
 
 #: Decorate a share creation task; it records into the share creation state and message attributes.
@@ -328,8 +353,18 @@ def get_allocation_group(allocation):
     return group
 
 
-class ActiveDirectoryNotFoundError(Exception):
+class ActiveDirectoryNotReadyError(Exception):
+    """AD can't yet give a task what it needs. Tasks catch this to wait and retry."""
+
+
+class ActiveDirectoryNotFoundError(ActiveDirectoryNotReadyError):
     def __init__(self, message="Active Directory entry not found"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class ActiveDirectoryUnavailableError(ActiveDirectoryNotReadyError):
+    def __init__(self, message="Active Directory could not be reached"):
         self.message = message
         super().__init__(self.message)
 
@@ -358,29 +393,53 @@ class GIDNotFoundError(ActiveDirectoryNotFoundError):
         super().__init__(self.message)
 
 
-def lookup_ad_entries(owner=None, group=None):
+#: ldap3 errors that mean AD couldn't be reached or didn't answer, rather than that the lookup was
+#: wrong (an invalid filter, say): a task waits and retries on these.
+AD_UNAVAILABLE_ERRORS = (
+    LDAPBindError,
+    LDAPCommunicationError,
+    LDAPResponseTimeoutError,
+    LDAPServerPoolExhaustedError,
+    LDAPStartTLSError,
+)
+
+
+def lookup_ad_entries(owner=None, group=None, *, require_gid=True):
     """Look up a user and/or a group in AD, checking each has its POSIX id yet.
 
     Returns (user entry, group entry) as ADSearch returns them, with None for one not asked for.
     Raises UserNotFoundError or UIDNotFoundError for the user, GroupNotFoundError or GIDNotFoundError
-    for the group. All four are ActiveDirectoryNotFoundError: AD can lag behind Grouper and account
-    creation, so a task that catches that can retry with schedule_retry().
+    for the group, and ActiveDirectoryUnavailableError if AD can't be reached. All of them are
+    ActiveDirectoryNotReadyError: AD can lag behind Grouper and account creation, or be down for a
+    while, so a task that catches that can retry with schedule_retry().
+
+    require_gid=False accepts a group with no gidNumber: SMB-only groups, like RStore's, have none.
     """
-    ad_search = ADSearch("", "")
-    user_entry = group_entry = None
-    if owner is not None:
-        user_entry = ad_search.get_ad_user(owner)
-        if not user_entry:
-            raise UserNotFoundError(f"Could not find user {owner} in AD")
-        if not user_entry.get("uidNumber"):
-            raise UIDNotFoundError(f"User {owner} is in AD but has no UID yet")
-    if group is not None:
-        group_entry = ad_search.get_ad_group(group)
-        if not group_entry:
-            raise GroupNotFoundError(f"Could not find group {group} in AD")
-        if not group_entry.get("gidNumber"):
-            raise GIDNotFoundError(f"Group {group} is in AD but has no GID yet")
-    return user_entry, group_entry
+    try:
+        ad_search = ADSearch("", "")  # binds a connection
+    except AD_UNAVAILABLE_ERRORS as e:
+        raise ActiveDirectoryUnavailableError(f"Could not connect to AD: {e}") from e
+    try:
+        user_entry = group_entry = None
+        if owner is not None:
+            user_entry = ad_search.get_ad_user(owner)
+            if not user_entry:
+                raise UserNotFoundError(f"Could not find user {owner} in AD")
+            if not user_entry.get("uidNumber"):
+                raise UIDNotFoundError(f"User {owner} is in AD but has no UID yet")
+        if group is not None:
+            group_entry = ad_search.get_ad_group(group)
+            if not group_entry:
+                raise GroupNotFoundError(f"Could not find group {group} in AD")
+            if require_gid and not group_entry.get("gidNumber"):
+                raise GIDNotFoundError(f"Group {group} is in AD but has no GID yet")
+        return user_entry, group_entry
+    except AD_UNAVAILABLE_ERRORS as e:
+        raise ActiveDirectoryUnavailableError(f"AD did not answer: {e}") from e
+    finally:
+        # each lookup binds its own connection; don't leave it open in a long-lived worker
+        with suppress(LDAPException):
+            ad_search.conn.unbind()
 
 
 def schedule_retry(task, error, *, retries, wait, **task_kwargs) -> None:
