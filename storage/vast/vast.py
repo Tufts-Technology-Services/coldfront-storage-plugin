@@ -14,6 +14,7 @@ from storage.constants import (
 )
 from storage.utils import (
     ActiveDirectoryNotReadyError,
+    BatchTally,
     TaskRetryScheduled,
     get_client_config,
     lookup_ad_entries,
@@ -31,15 +32,16 @@ def get_quotas_batch(resource_id, client_config_id):
     resource = Resource.objects.get(id=resource_id)
     client_config = get_client_config(client_config_id)
     allocations = resource.allocation_set.distinct()
+    tally = BatchTally()
     for allocation in allocations:
         native_path_attr = allocation.allocationattribute_set.filter(
             allocation_attribute_type__name=client_config["native_path_attribute_name"]
         ).first()
         if native_path_attr:
             vast_path = native_path_attr.value.strip()  # remove any leading or trailing whitespace
-            validate_posix_path(vast_path)
             logger.info(f"Getting quota for allocation {allocation.pk} with path {vast_path}")
             try:
+                # validates the path, inside the try so that one bad path fails only its own allocation
                 q = get_quota(vast_path, client_config_id)
                 if "soft_limit" in q and q["soft_limit"] is not None:
                     current_quota = q["soft_limit"]
@@ -55,13 +57,17 @@ def get_quotas_batch(resource_id, client_config_id):
                     round(bytes_to_units(current_quota, STORAGE_PLUGIN_STORAGE_UNITS), 2),
                 )
                 update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
+                tally.updated += 1
 
             except Exception as e:
                 logger.error(f"Error getting quota info for allocation {allocation} with path {vast_path}: {e}")
+                tally.failed += 1
         else:
             logger.warning(
                 f"Allocation {allocation} does not have a vast_path attribute and will be skipped in quota retrieval task"
             )
+            tally.skipped += 1
+    return tally.task_result()
 
 
 def get_quota(native_path: str, client_config_id: str) -> dict:

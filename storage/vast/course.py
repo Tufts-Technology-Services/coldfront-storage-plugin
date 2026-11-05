@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from storage.directory_structure.tasks import create_course_folders
+from storage.directory_structure.utils import ClusterDirectoryNotVisibleError
 from storage.utils import (
     ActiveDirectoryNotReadyError,
     TaskRetryScheduled,
@@ -53,7 +54,7 @@ def create_course_share(
         cluster_path = Path(native_path_to_cluster_path(native_path, client_config_id=client_config_id))
         create_course_folders(cluster_path=cluster_path, owner=owner, group=group, members=[])
 
-    except (ActiveDirectoryNotReadyError, VastViewNotFoundError) as e:
+    except (ActiveDirectoryNotReadyError, VastViewNotFoundError, ClusterDirectoryNotVisibleError) as e:
         schedule_retry(
             create_course_share,
             e,
@@ -67,4 +68,3 @@ def create_course_share(
             allocation_pk=allocation_pk,
         )
         raise TaskRetryScheduled(str(e)) from e
-

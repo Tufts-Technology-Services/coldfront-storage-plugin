@@ -12,6 +12,7 @@ from .constants import (
 )
 from .utils import (
     ActiveDirectoryNotReadyError,
+    BatchTally,
     TaskRetryScheduled,
     get_client_config,
     lookup_ad_entries,
@@ -44,6 +45,7 @@ def get_quotas_batch(resource_id, client_config_id):
     resource = Resource.objects.get(id=resource_id)
     allocations = resource.allocation_set.distinct()
     # get allocation info from TrueNAS API and update allocation attributes in coldfront
+    tally = BatchTally()
     for allocation in allocations:
         storage_path_attr = allocation.allocationattribute_set.filter(
             allocation_attribute_type__name="truenas_path"
@@ -61,13 +63,17 @@ def get_quotas_batch(resource_id, client_config_id):
                     str(round(bytes_to_units(current_quota, STORAGE_PLUGIN_STORAGE_UNITS), 2)),
                 )
                 update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
+                tally.updated += 1
 
             except Exception as e:
                 logger.error(
                     f"Error getting quota info from TrueNAS for allocation {allocation} with path {storage_path}: {e}"
                 )
+                tally.failed += 1
         else:
             logger.warning(f"Allocation {allocation} does not have a Storage Path attribute")
+            tally.skipped += 1
+    return tally.task_result()
 
 
 @records_share_creation_state

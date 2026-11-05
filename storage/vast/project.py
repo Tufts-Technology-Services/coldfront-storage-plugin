@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from storage.directory_structure.tasks import create_project_folders
+from storage.directory_structure.utils import ClusterDirectoryNotVisibleError
 from storage.utils import (
     ActiveDirectoryNotReadyError,
     TaskRetryScheduled,
@@ -51,7 +52,7 @@ def create_project_share(
         create_project_share_file_structure(
             native_path=native_path, owner=owner, group=group, client_config_id=client_config_id
         )
-    except (ActiveDirectoryNotReadyError, VastViewNotFoundError) as e:
+    except (ActiveDirectoryNotReadyError, VastViewNotFoundError, ClusterDirectoryNotVisibleError) as e:
         schedule_retry(
             create_project_share,
             e,

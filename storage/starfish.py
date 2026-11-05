@@ -6,7 +6,7 @@ from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, update_allocation_attribute_value
 
 from storage.constants import USAGE_MATCH_ATTRIBUTE_NAME
-from storage.utils import get_client_config, update_allocation_usage
+from storage.utils import BatchTally, get_client_config, update_allocation_usage
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +30,13 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
     sf_attrs = list(AllocationAttribute.objects.filter(allocation__in=resource_allocations,
         allocation_attribute_type__name=path_attr).select_related("allocation"))
 
+    tally = BatchTally()
+
     # log a warning for Allocations of this resource that are missing a native path attribute
     with_path = {attr.allocation_id for attr in sf_attrs}
     for alloc_pk in resource_allocations.values_list("pk", flat=True):
         if alloc_pk not in with_path:
+            tally.skipped += 1
             logger.warning(f"Allocation {alloc_pk} of resource {resource.name} is missing required native path attribute '{path_attr}' and will be skipped in Starfish usage retrieval task.")
 
     # validate before grouping by volume, so that an invalid value can neither contribute a bogus
@@ -45,6 +48,7 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
         except ValueError as e:
             logger.warning(f"Skipping allocation {attr.allocation.pk} with invalid Starfish path '{attr.value}': {e}")
             update_allocation_attribute_value(attr.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
+            tally.skipped += 1
         else:
             valid_attrs.append(attr)
 
@@ -53,19 +57,31 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
 
     for vol in volumes:
         vol_attributes = [attr for attr in valid_attrs if attr.value.startswith(f"{vol}:")]
-        volume_data = get_starfish_usage_data_by_volume(vol, client_config_id)
+        try:
+            volume_data = get_starfish_usage_data_by_volume(vol, client_config_id)
+        except Exception as e:
+            # one volume Starfish can't answer for fails only that volume's allocations
+            logger.error(f"Error getting Starfish usage for volume {vol}: {e}")
+            tally.failed += len(vol_attributes)
+            continue
         for vol_path in vol_attributes:
-            usage, _ = get_path_usage_data(volume_data, vol_path.value)
-            if usage is not None:
-                report_date = datetime.now()
-                logger.info(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
-                update_allocation_usage(vol_path.allocation, usage, report_date)
-                update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "Yes")
-            else:
-                logger.warning(f"No matching subfolder found for allocation attribute with vol_path value {vol_path.value}")
-                update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
+            try:
+                usage, _ = get_path_usage_data(volume_data, vol_path.value)
+                if usage is not None:
+                    report_date = datetime.now()
+                    logger.info(f"Updating usage for allocation {vol_path.allocation.pk} with usage {usage} bytes and report date {report_date}")
+                    update_allocation_usage(vol_path.allocation, usage, report_date)
+                    update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "Yes")
+                    tally.updated += 1
+                else:
+                    logger.warning(f"No matching subfolder found for allocation attribute with vol_path value {vol_path.value}")
+                    update_allocation_attribute_value(vol_path.allocation, USAGE_MATCH_ATTRIBUTE_NAME, "No")
+                    tally.unmatched += 1
+            except Exception as e:
+                logger.error(f"Error updating Starfish usage for allocation {vol_path.allocation.pk}: {e}")
+                tally.failed += 1
 
-    return True
+    return tally.task_result()
 
 
 @ttl_cache(timeout=60*60)

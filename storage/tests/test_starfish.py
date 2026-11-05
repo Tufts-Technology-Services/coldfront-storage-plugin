@@ -95,7 +95,7 @@ def test_get_storage_usage_batch_updates_matching_allocations(
     matched = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:/good"})
     unmatched = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:/absent"})
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") is True
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "updated 1, unmatched 1"}
 
     mock_get_volume_data.assert_called_once_with("vol1", "hpc")
     assert mock_update_usage.call_count == 1
@@ -123,7 +123,7 @@ def test_get_storage_usage_batch_stamps_no_for_an_empty_volume_name(
 
     invalid = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: ":/no/volume"})
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") is True
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "skipped 1"}
 
     mock_update_usage.assert_not_called()
     assert invalid.get_attribute(USAGE_MATCH_ATTRIBUTE_NAME) == "No"
@@ -149,7 +149,7 @@ def test_get_storage_usage_batch_stamps_every_malformed_path(
     empty_subfolder = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:"})
     missing_attribute = make_allocation(storage_resource)
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") is True
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "skipped 4"}
 
     mock_update_usage.assert_not_called()
     for allocation in (colonless, empty_volume, empty_subfolder):
@@ -172,7 +172,8 @@ def test_get_storage_usage_batch_does_not_query_bogus_volumes(
     """Volume names are harvested only from paths that validated, so Starfish is never asked
     about a volume invented from a malformed value."""
     mock_get_client_config.return_value = {"native_path_attribute_name": PATH_ATTRIBUTE_NAME}
-    mock_get_volume_data.return_value = []
+    # a match for the good path, so the run isn't failed for having nothing matched
+    mock_get_volume_data.return_value = [{"vol_path": "vol1:/good", "logical_size": 1, "sync": 1700000000}]
 
     make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:/good"})
     make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "no-colon"})

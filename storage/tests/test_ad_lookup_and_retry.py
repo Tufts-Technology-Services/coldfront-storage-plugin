@@ -154,13 +154,29 @@ def test_folder_creation_waits_for_the_group(
     allocation = make_allocation(storage_resource, attributes={CLUSTER_PATH_ATTRIBUTE_NAME: "/cluster/tufts/p"})
     ad.get_ad_group.return_value = None
 
-    assert directory_tasks.create_folders(allocation.pk, "hpc_project") is None
+    result = directory_tasks.create_folders(allocation.pk, "hpc_project")
 
+    assert result == {"message": "scheduled:Could not find group g in AD (runs again in 3 minutes, 4 retries left)"}
     mock_folders.assert_not_called()
     assert import_string(mock_schedule.call_args.args[0]) is directory_tasks.create_folders
     assert mock_schedule.call_args.kwargs["allocation_pk"] == allocation.pk
     assert mock_schedule.call_args.kwargs["structure_type"] == "hpc_project"
     assert mock_schedule.call_args.kwargs["retries"] == 4
+
+
+@patch("storage.utils.schedule")
+@patch("storage.directory_structure.tasks.create_project_folders")
+@patch("storage.directory_structure.tasks.get_allocation_group", return_value="g")
+def test_folder_creation_reports_success_on_the_task_report(
+    mock_group, mock_folders, mock_schedule, storage_resource, make_allocation
+):
+    allocation = make_allocation(storage_resource, attributes={CLUSTER_PATH_ATTRIBUTE_NAME: "/cluster/tufts/p"})
+
+    result = directory_tasks.create_folders(allocation.pk, "hpc_project")
+
+    assert result == {"message": f"successful: created hpc_project folders for allocation {allocation.pk}"}
+    mock_folders.assert_called_once()
+    mock_schedule.assert_not_called()
 
 
 # --- AD that can't be reached, and its connections --------------------------------------------

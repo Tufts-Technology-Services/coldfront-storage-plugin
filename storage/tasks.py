@@ -37,12 +37,15 @@ def get_storage_usage_batch():
         )
 
     handlers = StorageHandler.objects.all()
+    queued, unconfigured = [], []
 
     for storage_type in handlers:
         get_usage_task = storage_type.get_usage_batch_task if storage_type else None
         if get_usage_task is None:
             logger.warning(f"No usage retrieval task configured for storage system type '{storage_type.resource.name}'")
+            unconfigured.append(storage_type.resource.name)
             continue
+        queued.append(storage_type.resource.name)
         logger.info(f"Getting usage for resource {storage_type.resource.name}")
 
         if STORAGE_LOG_ONLY:
@@ -52,6 +55,7 @@ def get_storage_usage_batch():
             )
             continue
         async_task(get_usage_task, storage_type.resource.id, storage_type.usage_client_id)
+    return _dispatch_result(queued, unconfigured)
 
 
 def get_storage_quotas_batch():
@@ -65,12 +69,15 @@ def get_storage_quotas_batch():
         )
 
     handlers = StorageHandler.objects.all()
+    queued, unconfigured = [], []
 
     for storage_type in handlers:
         get_quotas_task = storage_type.get_quotas_batch_task if storage_type else None
         if get_quotas_task is None:
             logger.warning(f"No quota task configured for storage system type '{storage_type.resource.name}'")
+            unconfigured.append(storage_type.resource.name)
             continue
+        queued.append(storage_type.resource.name)
         logger.info(f"Getting quotas for resource {storage_type.resource.name}")
 
         if STORAGE_LOG_ONLY:
@@ -80,6 +87,16 @@ def get_storage_quotas_batch():
             )
             continue
         async_task(get_quotas_task, storage_type.resource.id, storage_type.quota_client_id)
+    return _dispatch_result(queued, unconfigured)
+
+
+def _dispatch_result(queued: list, unconfigured: list) -> dict:
+    """The task report message for a batch task that queues one task per storage resource."""
+    verb = "would have queued (STORAGE_LOG_ONLY)" if STORAGE_LOG_ONLY else "queued"
+    message = f"{verb} {len(queued)}: {', '.join(queued) or 'none'}"
+    if unconfigured:
+        message += f"; no task configured for {', '.join(unconfigured)}"
+    return {"message": message}
 
 
 def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_attribute_change_id=None):

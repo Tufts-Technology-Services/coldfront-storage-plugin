@@ -34,6 +34,9 @@ USAGE_IN_BYTES_ATTRIBUTE_NAME= ENV.str("USAGE_IN_BYTES_ATTRIBUTE_NAME", default=
 USAGE_REPORT_DATE_ATTRIBUTE_NAME= ENV.str("USAGE_REPORT_DATE_ATTRIBUTE_NAME", default="usage_report_date")
 GROUP_ATTRIBUTE_NAME = ENV.str("GROUP_ATTRIBUTE_NAME", default="Group")
 STORAGE_LOG_ONLY = ENV.bool("STORAGE_LOG_ONLY", default=True)
+# a batch task fails when more than this share of the allocations it looked up went wrong;
+# fewer is reported in the task's counts, so one bad allocation doesn't fail the whole run
+STORAGE_BATCH_FAILURE_THRESHOLD = ENV.float("STORAGE_BATCH_FAILURE_THRESHOLD", default=0.5)
 ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION = ENV.bool("STORAGE_ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION", default=False)
 USAGE_MATCH_ATTRIBUTE_NAME = ENV.str("USAGE_MATCH_ATTRIBUTE_NAME", default="usage_source_matched") # name of the allocation attribute that indicates whether the usage retrieval task was able to match the allocation to a usage source in the storage system (e.g., a path or share) based on the configured usage_match_attribute_name in the client config; this can be used for troubleshooting and monitoring purposes
 QUOTA_MATCH_ATTRIBUTE_NAME = ENV.str("QUOTA_MATCH_ATTRIBUTE_NAME", default="quota_source_matched") # name of the allocation attribute that indicates whether the quota retrieval task was able to match the allocation to a quota source in the storage system (e.g., a path or share) based on the configured usage_match_attribute_name in the client config; this can be used for troubleshooting and monitoring purposes

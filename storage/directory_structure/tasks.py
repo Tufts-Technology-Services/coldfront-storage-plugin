@@ -3,11 +3,12 @@ from pathlib import Path
 
 from coldfront.core.allocation.models import Allocation
 
-from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME
+from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, ProvisionStatus
 from storage.directory_structure import PosixDeploymentRunner
 from storage.directory_structure.course import deploy_course_directory
 from storage.directory_structure.hpc_projects import deploy_project_directory
 from storage.directory_structure.scratch import deploy_personal_scratch_directory
+from storage.directory_structure.utils import ClusterDirectoryNotVisibleError
 from storage.utils import (
     ActiveDirectoryNotReadyError,
     get_allocation_group,
@@ -19,7 +20,7 @@ from storage.utils import (
 logger = logging.getLogger(__name__)
 
 
-def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
+def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=3):
     # checked first, so a bad value fails at once rather than after waiting out AD's retries
     if structure_type not in ("hpc_project", "hpc_course"):
         logger.error(f"Unknown structure type {structure_type}. Cannot create folders.")
@@ -40,16 +41,20 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=5):
     try:
         # the folders are owned by the PI and the group, so both must be in AD first
         lookup_ad_entries(owner, group)
-    except ActiveDirectoryNotReadyError as e:
+        if structure_type == "hpc_project":
+            create_project_folders(cluster_path, owner, group, list(members))
+        else:
+            create_course_folders(cluster_path, owner, group, list(members))
+    except (ActiveDirectoryNotReadyError, ClusterDirectoryNotVisibleError) as e:
         # not a decorated task, so there's no state to record: schedule the retry and stop here
         schedule_retry(
             create_folders, e, retries=retries, wait=wait, allocation_pk=allocation_pk, structure_type=structure_type
         )
-        return
-    if structure_type == "hpc_project":
-        create_project_folders(cluster_path, owner, group, list(members))
-    else:
-        create_course_folders(cluster_path, owner, group, list(members))
+        # django-q stores this as the task result, and the task report shows its "message"
+        return {
+            "message": f"{ProvisionStatus.SCHEDULED}:{e} (runs again in {wait} minutes, {retries - 1} retries left)"
+        }
+    return {"message": f"{ProvisionStatus.SUCCESSFUL}: created {structure_type} folders for allocation {allocation_pk}"}
 
 
 def create_project_folders(cluster_path: Path, owner: str, group: str, members: list):
@@ -60,10 +65,11 @@ def create_project_folders(cluster_path: Path, owner: str, group: str, members: 
     runner.add_deployment(
         deploy_project_directory,
         parent_directory=cluster_path.parent,
-        project_directory=cluster_path.name,
+        project_directory_name=cluster_path.name,
         project_members=members,
         owner=owner,
         group=group,
+        require_existing=True,
     )
     runner.run()
 
@@ -84,10 +90,11 @@ def create_course_folders(cluster_path: Path, owner: str, group: str, members: l
     runner.add_deployment(
         deploy_course_directory,
         parent_directory=cluster_path.parent,
-        course_directory=cluster_path.name,
+        course_directory_name=cluster_path.name,
         course_members=members,
         owner=owner,
         group=group,
         admin_group=admin_group,
+        require_existing=True,
     )
     runner.run()

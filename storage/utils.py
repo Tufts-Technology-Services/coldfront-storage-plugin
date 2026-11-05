@@ -3,6 +3,7 @@ import inspect
 import logging
 import re
 from contextlib import suppress
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
@@ -35,6 +36,7 @@ from .constants import (
     QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
     SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME,
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
+    STORAGE_BATCH_FAILURE_THRESHOLD,
     STORAGE_PLUGIN_STORAGE_UNITS,
     USAGE_IN_BYTES_ATTRIBUTE_NAME,
     USAGE_REPORT_DATE_ATTRIBUTE_NAME,
@@ -463,3 +465,38 @@ def schedule_retry(task, error, *, retries, wait, **task_kwargs) -> None:
         schedule_type=Schedule.ONCE,
         next_run=datetime.now(timezone.utc) + timedelta(minutes=wait),
     )
+
+
+class BatchMostlyFailedError(Exception):
+    """A batch task went wrong for too many of its allocations to count as having worked."""
+
+
+@dataclass
+class BatchTally:
+    """What a batch task did with each of its allocations, reported on the task report.
+
+    updated: got fresh data. unmatched: the storage system had nothing for its path. failed: looking
+    it up raised. skipped: it had no usable path to look up, a gap in its attributes rather than a
+    fault, so it counts neither for nor against the run.
+    """
+
+    updated: int = 0
+    unmatched: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+    def summary(self) -> str:
+        counts = [f"{outcome} {count}" for outcome, count in asdict(self).items() if count]
+        return ", ".join(counts) or "no allocations"
+
+    def task_result(self) -> dict:
+        """Return the task's result, or raise BatchMostlyFailedError if too much of the run went wrong.
+
+        Unmatched counts against the run along with failed: a storage system with nothing for most
+        paths is a fault even when no call raised.
+        """
+        looked_up = self.updated + self.unmatched + self.failed
+        went_wrong = self.unmatched + self.failed
+        if looked_up and went_wrong / looked_up > STORAGE_BATCH_FAILURE_THRESHOLD:
+            raise BatchMostlyFailedError(f"{went_wrong} of {looked_up} allocations went wrong: {self.summary()}")
+        return {"message": self.summary()}
