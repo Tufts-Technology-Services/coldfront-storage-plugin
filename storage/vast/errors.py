@@ -16,3 +16,10 @@ class VastNotFoundError(VastError):
 
 class VastViewNotFoundError(VastNotFoundError):
     """Raised when a requested view is not found in VAST."""
+
+
+class VastQuotaNotFoundError(VastNotFoundError, ValueError):
+    """Raised when VAST has no quota for a path.
+
+    Also a ValueError, which is what a missing quota raised before this class existed.
+    """

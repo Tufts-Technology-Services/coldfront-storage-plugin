@@ -51,9 +51,14 @@ def get_quotas_batch(resource_id, client_config_id):
             allocation_attribute_type__name="truenas_path"
         ).first()
         if storage_path_attr:
-            storage_path = storage_path_attr.value
+            storage_path = storage_path_attr.value.strip()  # remove any leading or trailing whitespace
             try:
                 r = [q for q in all_quotas if q["mountpoint"] == storage_path]
+                if not r:
+                    # TrueNAS answered and has no dataset there: a wrong path or a share not made yet, not a fault
+                    logger.warning(f"No TrueNAS dataset for allocation {allocation} with path {storage_path}")
+                    tally.unmatched += 1
+                    continue
                 current_quota = r[0]["quota"]
                 report_date = datetime.datetime.now()  # TrueNAS API does not provide a timestamp for when the quota information was last updated, so we will use the current time as the report date
                 update_allocation_attribute_value(allocation, QUOTA_IN_BYTES_ATTRIBUTE_NAME, current_quota)

@@ -22,7 +22,7 @@ from storage.utils import (
     records_share_creation_state,
     schedule_retry,
 )
-from storage.vast.errors import VastViewNotFoundError
+from storage.vast.errors import VastQuotaNotFoundError, VastViewNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,9 @@ def get_quotas_batch(resource_id, client_config_id):
     resource = Resource.objects.get(id=resource_id)
     client_config = get_client_config(client_config_id)
     allocations = resource.allocation_set.distinct()
+    # one VAST call for the whole run, so VAST being down fails it once with VAST's own error,
+    # rather than every allocation waiting out the client's timeout and retries in turn
+    all_quotas = get_all_quotas(client_config_id)
     tally = BatchTally()
     for allocation in allocations:
         native_path_attr = allocation.allocationattribute_set.filter(
@@ -42,7 +45,7 @@ def get_quotas_batch(resource_id, client_config_id):
             logger.info(f"Getting quota for allocation {allocation.pk} with path {vast_path}")
             try:
                 # validates the path, inside the try so that one bad path fails only its own allocation
-                q = get_quota(vast_path, client_config_id)
+                q = find_quota(all_quotas, vast_path)
                 if "soft_limit" in q and q["soft_limit"] is not None:
                     current_quota = q["soft_limit"]
                 elif "hard_limit" in q and q["hard_limit"] is not None:
@@ -59,6 +62,10 @@ def get_quotas_batch(resource_id, client_config_id):
                 update_allocation_attribute_value(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME, report_date.isoformat())
                 tally.updated += 1
 
+            except VastQuotaNotFoundError as e:
+                # VAST answered and has no quota there: a wrong path or a share not made yet, not a fault
+                logger.warning(f"No VAST quota for allocation {allocation} with path {vast_path}: {e}")
+                tally.unmatched += 1
             except Exception as e:
                 logger.error(f"Error getting quota info for allocation {allocation} with path {vast_path}: {e}")
                 tally.failed += 1
@@ -71,9 +78,12 @@ def get_quotas_batch(resource_id, client_config_id):
 
 
 def get_quota(native_path: str, client_config_id: str) -> dict:
-    all_quotas = get_all_quotas(
-        client_config_id
-    )  # This function is decorated with @ttl_cache, so it will return cached data if available
+    # get_all_quotas is decorated with @ttl_cache, so it will return cached data if available
+    return find_quota(get_all_quotas(client_config_id), native_path)
+
+
+def find_quota(all_quotas: list, native_path: str) -> dict:
+    """Find the quota for `native_path` in a list from get_all_quotas, without calling VAST."""
     vast_path = native_path.strip()  # remove any leading or trailing whitespace
     validate_posix_path(vast_path)
     logger.info(f"Looking for quota with id {vast_path} in VAST quotas data")
@@ -81,7 +91,7 @@ def get_quota(native_path: str, client_config_id: str) -> dict:
     if len(res) > 0:
         return res[0]
     else:
-        raise ValueError(f"No matching quota found in cached VAST quotas for path {vast_path}")
+        raise VastQuotaNotFoundError(f"No matching quota found in cached VAST quotas for path {vast_path}")
 
 
 @ttl_cache(timeout=60 * 60)

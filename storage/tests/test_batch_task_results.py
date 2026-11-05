@@ -62,42 +62,74 @@ def test_the_threshold_is_a_setting():
 # --- VAST quotas -------------------------------------------------------------------------------
 
 
+def vast_quota(path, soft_limit=10**12):
+    return {"path": path, "soft_limit": soft_limit, "hard_limit": None, "pretty_state": "OK"}
+
+
 @pytest.fixture
 def vast_quota_mocks():
+    """Stub VAST's quota list, so the batch looks each allocation up in it."""
     with (
         patch("storage.vast.vast.get_client_config", return_value={"native_path_attribute_name": VAST_PATH}),
         patch("storage.vast.vast.update_allocation_attribute_value"),
-        patch("storage.vast.vast.get_quota") as get_quota,
+        patch("storage.vast.vast.get_all_quotas", return_value=[vast_quota("/projects/good")]) as get_all_quotas,
     ):
-        yield get_quota
+        yield get_all_quotas
 
 
 def test_vast_quotas_count_each_allocation(vast_quota_mocks, storage_resource, make_allocation):
-    def quota_for(path, _client_config_id):
-        if path != "/projects/good":
-            raise ValueError(f"No matching quota found for {path}")
-        return {"soft_limit": 10**12}
-
-    vast_quota_mocks.side_effect = quota_for
     for path in ("/projects/good", "/projects/good", "/projects/good", "/projects/gone"):
         make_allocation(storage_resource, attributes={VAST_PATH: path})
     make_allocation(storage_resource)
 
-    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 3, skipped 1, failed 1"}
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 3, unmatched 1, skipped 1"}
 
 
 def test_one_bad_vast_path_does_not_stop_the_rest(vast_quota_mocks, storage_resource, make_allocation):
-    """get_quota validates the path; a bad one used to raise out of the loop and end the run."""
-    vast_quota_mocks.side_effect = [ValueError("not a posix path"), {"soft_limit": 1}, {"soft_limit": 1}]
-    for path in ("bad path", "/projects/a", "/projects/b"):
+    """The lookup validates the path; a bad one used to raise out of the loop and end the run."""
+    for path in ("/projects//good", "/projects/good", "/projects/good"):
         make_allocation(storage_resource, attributes={VAST_PATH: path})
 
     assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 2, failed 1"}
 
 
-def test_vast_quotas_fail_when_most_lookups_fail(vast_quota_mocks, storage_resource, make_allocation):
-    vast_quota_mocks.side_effect = ValueError("VAST is down")
-    make_allocation(storage_resource, attributes={VAST_PATH: "/projects/a"})
+def test_vast_is_asked_for_its_quotas_once_per_run(vast_quota_mocks, storage_resource, make_allocation):
+    for path in ("/projects/good", "/projects/gone", "/projects/good"):
+        make_allocation(storage_resource, attributes={VAST_PATH: path})
+
+    vast.get_quotas_batch(storage_resource.pk, "hpc")
+
+    vast_quota_mocks.assert_called_once_with("hpc")
+
+
+def test_vast_being_down_fails_the_run_once(vast_quota_mocks, storage_resource, make_allocation):
+    """Not once per allocation, each waiting out the client's timeout before the threshold is reached."""
+    vast_quota_mocks.side_effect = ConnectionError("VAST is down")
+    for path in ("/projects/a", "/projects/b", "/projects/c"):
+        make_allocation(storage_resource, attributes={VAST_PATH: path})
+
+    with pytest.raises(ConnectionError, match="VAST is down"):
+        vast.get_quotas_batch(storage_resource.pk, "hpc")
+
+    vast_quota_mocks.assert_called_once()
+
+
+def test_a_path_vast_has_no_quota_for_is_unmatched_not_failed(vast_quota_mocks, storage_resource, make_allocation):
+    """VAST answered; telling a wrong path apart from a VAST fault is what the counts are for."""
+    for path in ("/projects/good", "/projects/good", "/projects/good", "/projects/gone", "/projects//bad"):
+        make_allocation(storage_resource, attributes={VAST_PATH: path})
+
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 3, unmatched 1, failed 1"}
+
+
+def test_a_missing_quota_is_still_a_value_error():
+    """get_quota raised ValueError for this before, so anything catching that still works."""
+    with pytest.raises(ValueError, match="/projects/gone"):
+        vast.find_quota([vast_quota("/projects/good")], "/projects/gone")
+
+
+def test_vast_quotas_fail_when_most_paths_have_no_quota(vast_quota_mocks, storage_resource, make_allocation):
+    make_allocation(storage_resource, attributes={VAST_PATH: "/projects/gone"})
 
     with pytest.raises(BatchMostlyFailedError, match="1 of 1"):
         vast.get_quotas_batch(storage_resource.pk, "hpc")
@@ -115,7 +147,32 @@ def test_truenas_quotas_count_each_allocation(mock_client, mock_update, storage_
     make_allocation(storage_resource, attributes={"truenas_path": "/mnt/t2/missing"})
     make_allocation(storage_resource)
 
-    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 2, skipped 1, failed 1"}
+    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 2, unmatched 1, skipped 1"}
+
+
+@patch("storage.truenas.update_allocation_attribute_value")
+@patch("storage.truenas.get_truenas_client")
+def test_a_path_truenas_has_no_dataset_for_is_unmatched_not_failed(
+    mock_client, mock_update, storage_resource, make_allocation
+):
+    """TrueNAS answered; a dataset it returned without a quota is the fault, a missing one isn't."""
+    mock_client.return_value.get_all_datasets.return_value = [
+        {"mountpoint": "/mnt/t2/a", "quota": 10**12},
+        {"mountpoint": "/mnt/t2/no_quota"},
+    ]
+    for path in ("/mnt/t2/a", "/mnt/t2/a", "/mnt/t2/a", "/mnt/t2/missing", "/mnt/t2/no_quota"):
+        make_allocation(storage_resource, attributes={"truenas_path": path})
+
+    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 3, unmatched 1, failed 1"}
+
+
+@patch("storage.truenas.update_allocation_attribute_value")
+@patch("storage.truenas.get_truenas_client")
+def test_a_truenas_path_with_stray_spaces_still_matches(mock_client, mock_update, storage_resource, make_allocation):
+    mock_client.return_value.get_all_datasets.return_value = [{"mountpoint": "/mnt/t2/a", "quota": 10**12}]
+    make_allocation(storage_resource, attributes={"truenas_path": " /mnt/t2/a \n"})
+
+    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 1"}
 
 
 # --- Starfish usage ----------------------------------------------------------------------------
