@@ -49,3 +49,28 @@ def deploy_course_directory(
             group=admin_group,
             mode="2770",
         )
+
+
+@deploy("Create course member directory")
+def deploy_course_member_directory(
+    parent_directory: Path = None,
+    course_directory_name: str = None,
+    username: str = None,
+    admin_group: str = None,
+    require_existing: bool = True,
+):
+    """One member's folder in a course directory: what deploy_course_directory makes for each member."""
+    require_subdirectory_arguments(parent_directory, course_directory_name)
+    course_dir = parent_directory / course_directory_name
+
+    # requires the course directory to exist before proceeding if require_existing is True
+    if require_existing:
+        require_existing_directory(course_dir)
+
+    create_subdirectory(
+        parent_directory=course_dir,
+        subdirectory_name=username,
+        owner=username,
+        group=admin_group,
+        mode="2770",
+    )

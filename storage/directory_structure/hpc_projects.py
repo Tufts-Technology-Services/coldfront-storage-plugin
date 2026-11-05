@@ -40,3 +40,22 @@ def deploy_project_directory(
         create_subdirectory(
             parent_directory=project_dir, subdirectory_name=project_member, owner=project_member, group=group
         )
+
+
+@deploy("Create project member directory")
+def deploy_project_member_directory(
+    parent_directory: Path = None,
+    project_directory_name: str = None,
+    username: str = None,
+    group: str = None,
+    require_existing: bool = True,
+):
+    """One member's folder in a project directory: what deploy_project_directory makes for each member."""
+    require_subdirectory_arguments(parent_directory, project_directory_name)
+    project_dir = parent_directory / project_directory_name
+
+    # requires the project directory to exist before proceeding if require_existing is True
+    if require_existing:
+        require_existing_directory(project_dir)
+
+    create_subdirectory(parent_directory=project_dir, subdirectory_name=username, owner=username, group=group)

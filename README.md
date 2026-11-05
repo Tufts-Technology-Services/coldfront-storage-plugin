@@ -274,10 +274,30 @@ A task that waits this way:
 - takes every argument by keyword, as literals that django-q can store, and has no `retries` or
   `wait` parameters of its own: the decorator adds those to each call.
 
+### Folders on the cluster
+
+Three tasks make an allocation's folders, for allocations with a `directory_creation` attribute
+(`hpc_project` or `hpc_course`):
+
+- **The VAST project and course share tasks** make `shared` and the owner's folder, once the
+  share exists.
+- **`create_member_folder`** makes one member's folder when they're activated on the allocation.
+  The storage plugin's `allocation_activate_user` receiver queues it. It waits for that member and
+  the group to reach AD, and for the allocation's directory, every 3 minutes up to 5 times, so a
+  new member whose UID isn't ready yet waits on their own. A member no longer active on the
+  allocation when it runs is skipped. Its runs are named
+  `create_folders_<type>_<directory>_<username>`.
+- **`create_folders`** makes the whole tree: `shared`, the PI's folder, and every active member's.
+  It's for putting a tree right, for example after an outage. Queue it with
+  `create_directory(allocation_pk, structure_type)` from `storage.tasks`. Its runs are named
+  `create_folders_<type>_<directory>`.
+
+All of them can run again safely. A folder that's already there keeps its contents, and its
+owner, group and mode are set again.
+
 ### Waiting for the cluster directory
 
-Folder creation, both `create_folders` and the folder step of the VAST project and course share
-tasks, uses pyinfra to make the folders on `POSIX_FILESYSTEM_HOST`. It does not make the share's top
+Folder creation, all three tasks above, uses pyinfra to make the folders on `POSIX_FILESYSTEM_HOST`. It does not make the share's top
 directory: the storage system does, by creating the VAST view. On the cluster host that directory
 is on an autofs mount, where `mkdir` is always refused, and a view that was just created can take a
 while to appear there; autofs also caches a failed lookup for a short time.

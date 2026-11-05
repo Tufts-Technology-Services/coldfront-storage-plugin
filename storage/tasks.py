@@ -13,7 +13,12 @@ from storage.constants import (
     STORAGE_RESOURCE_TYPE_NAME,
     ProvisionStatus,
 )
-from storage.directory_structure.tasks import create_folders, folder_task_options
+from storage.directory_structure.tasks import (
+    create_folders,
+    create_member_folder,
+    folder_task_options,
+    member_folder_task_options,
+)
 from storage.models import StorageHandler
 from storage.utils import (
     build_task_result,
@@ -221,11 +226,24 @@ def create_share(allocation_pk: int):
 
 
 def create_directory(allocation_pk: int, structure_type: str):
+    """Queue the full folder tree for an allocation: for putting it right, such as after an outage."""
     # named like its retries, so the first run is found with them on the task report
     task_id = async_task(
         create_folders, allocation_pk, structure_type, q_options=folder_task_options(allocation_pk, structure_type)
     )
     logger.debug(f"Started async task {task_id} to create directory for allocation {allocation_pk}.")
+
+
+def create_member_directory(allocation_pk: int, structure_type: str, username: str):
+    """Queue one member's folder in an allocation's directory, for a member just activated on it."""
+    task_id = async_task(
+        create_member_folder,
+        allocation_pk,
+        structure_type,
+        username,
+        q_options=member_folder_task_options(allocation_pk, structure_type, username),
+    )
+    logger.debug(f"Started async task {task_id} to create {username}'s folder for allocation {allocation_pk}.")
 
 
 def get_storage_handler(allocation):

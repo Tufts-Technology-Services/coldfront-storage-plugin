@@ -14,7 +14,7 @@ from .constants import QUOTA_ATTRIBUTE_NAME
 from .tasks import (set_storage_quota, 
                     create_share, 
                     add_attributes_to_new_storage_allocation, 
-                    create_directory)
+                    create_member_directory)
 from .context_storage import get_request_username
 from .utils import (stamp_allocation_requester, stamp_allocation_approver, 
                     stamp_quota_requester, stamp_quota_approver)
@@ -79,7 +79,8 @@ def allocation_activate_user_add_folder_creation_handler(sender, **kwargs):
         if allocation.status.name not in ['Active']:
             logger.debug(f"Allocation {allocation.id} is not active. Skipping directory creation.")
             return
-        create_directory(allocation.id, dc.first().value)
+        # just this member's folder: the share task makes the rest of the tree
+        create_member_directory(allocation.id, dc.first().value, allocation_user.user.username)
 
 
 def enable_add_attributes():
