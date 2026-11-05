@@ -174,7 +174,7 @@ def test_folder_creation_reports_success_on_the_task_report(
 
     result = directory_tasks.create_folders(allocation.pk, "hpc_project")
 
-    assert result == {"message": f"successful: created hpc_project folders for allocation {allocation.pk}"}
+    assert result == {"message": f"successful:created hpc_project folders for allocation {allocation.pk}"}
     mock_folders.assert_called_once()
     mock_schedule.assert_not_called()
 

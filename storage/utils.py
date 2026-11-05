@@ -84,12 +84,12 @@ def _records_task_state(setter):
             except TaskRetryScheduled as e:
                 logger.info(f"{func.__qualname__} is scheduled to run again for allocation {allocation.pk}: {e}")
                 setter(allocation, ProvisionStatus.SCHEDULED, str(e), sender=wrapper)
-                return _task_result(ProvisionStatus.SCHEDULED, str(e))
+                return build_task_result(ProvisionStatus.SCHEDULED, str(e))
             except Exception as e:
                 logger.error(f"{func.__qualname__} failed for allocation {allocation.pk}: {e}")
                 setter(allocation, ProvisionStatus.FAILED, str(e), sender=wrapper, exception=e)
                 raise
-            payload = _task_result(ProvisionStatus.SUCCESSFUL, "", result)
+            payload = build_task_result(ProvisionStatus.SUCCESSFUL, "", result)
             setter(allocation, ProvisionStatus.SUCCESSFUL, sender=wrapper, result=payload)
             return payload
 
@@ -107,7 +107,7 @@ def _announce_outcome(successful, failed, sender, allocation, state, message, re
     exception. Receiver failures are logged instead.
     """
     if state == ProvisionStatus.SUCCESSFUL:
-        signal, arguments = successful, {"result": result if result is not None else _task_result(state, message)}
+        signal, arguments = successful, {"result": result if result is not None else build_task_result(state, message)}
     elif state == ProvisionStatus.FAILED:
         signal, arguments = failed, {"message": message, "exception": exception}
     else:
@@ -121,10 +121,12 @@ def _announce_outcome(successful, failed, sender, allocation, state, message, re
             )
 
 
-def _task_result(state: ProvisionStatus, reason: str, returned=None) -> dict:
-    """Build what a decorated task returns: its status, plus anything the body returned.
+def build_task_result(state: ProvisionStatus, reason: str, returned=None) -> dict:
+    """Build what a task returns: a "message" of "<state>:<reason>", plus anything else to carry.
 
-    A body that returns a dict has its keys carried through; any other value is kept under
+    Every task in this plugin builds its result here, so the message has one format: django-q
+    stores the result, and the task report shows its "message". The decorated tasks pass in what
+    their body returned: a dict has its keys carried through, and any other value is kept under
     "result". "message" is reserved for the status and always wins, so that a caller can rely on
     it being present and well formed whatever the body did.
     """
@@ -517,4 +519,4 @@ class BatchTally:
         went_wrong = self.unmatched + self.failed
         if looked_up and went_wrong / looked_up > STORAGE_BATCH_FAILURE_THRESHOLD:
             raise BatchMostlyFailedError(f"{went_wrong} of {looked_up} allocations went wrong: {self.summary()}")
-        return {"message": self.summary()}
+        return build_task_result(ProvisionStatus.SUCCESSFUL, self.summary())

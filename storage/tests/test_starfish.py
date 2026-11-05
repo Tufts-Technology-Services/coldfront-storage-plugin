@@ -95,7 +95,9 @@ def test_get_storage_usage_batch_updates_matching_allocations(
     matched = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:/good"})
     unmatched = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:/absent"})
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "updated 1, unmatched 1"}
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {
+        "message": "successful:updated 1, unmatched 1"
+    }
 
     mock_get_volume_data.assert_called_once_with("vol1", "hpc")
     assert mock_update_usage.call_count == 1
@@ -123,7 +125,7 @@ def test_get_storage_usage_batch_stamps_no_for_an_empty_volume_name(
 
     invalid = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: ":/no/volume"})
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "skipped 1"}
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "successful:skipped 1"}
 
     mock_update_usage.assert_not_called()
     assert invalid.get_attribute(USAGE_MATCH_ATTRIBUTE_NAME) == "No"
@@ -149,7 +151,7 @@ def test_get_storage_usage_batch_stamps_every_malformed_path(
     empty_subfolder = make_allocation(storage_resource, attributes={PATH_ATTRIBUTE_NAME: "vol1:"})
     missing_attribute = make_allocation(storage_resource)
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "skipped 4"}
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "hpc") == {"message": "successful:skipped 4"}
 
     mock_update_usage.assert_not_called()
     for allocation in (colonless, empty_volume, empty_subfolder):

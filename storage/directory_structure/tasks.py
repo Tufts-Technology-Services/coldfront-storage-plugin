@@ -11,6 +11,7 @@ from storage.directory_structure.scratch import deploy_personal_scratch_director
 from storage.directory_structure.utils import ClusterDirectoryNotVisibleError
 from storage.utils import (
     ActiveDirectoryNotReadyError,
+    build_task_result,
     get_allocation_group,
     lookup_ad_entries,
     schedule_retry,
@@ -50,11 +51,12 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=3):
         schedule_retry(
             create_folders, e, retries=retries, wait=wait, allocation_pk=allocation_pk, structure_type=structure_type
         )
-        # django-q stores this as the task result, and the task report shows its "message"
-        return {
-            "message": f"{ProvisionStatus.SCHEDULED}:{e} (runs again in {wait} minutes, {retries - 1} retries left)"
-        }
-    return {"message": f"{ProvisionStatus.SUCCESSFUL}: created {structure_type} folders for allocation {allocation_pk}"}
+        return build_task_result(
+            ProvisionStatus.SCHEDULED, f"{e} (runs again in {wait} minutes, {retries - 1} retries left)"
+        )
+    return build_task_result(
+        ProvisionStatus.SUCCESSFUL, f"created {structure_type} folders for allocation {allocation_pk}"
+    )
 
 
 def create_project_folders(cluster_path: Path, owner: str, group: str, members: list):

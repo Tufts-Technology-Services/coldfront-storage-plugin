@@ -25,15 +25,17 @@ def test_the_summary_leaves_out_outcomes_that_did_not_happen():
 
 
 def test_a_resource_with_no_allocations_says_so():
-    assert BatchTally().task_result() == {"message": "no allocations"}
+    assert BatchTally().task_result() == {"message": "successful:no allocations"}
 
 
 def test_a_run_with_a_few_failures_still_succeeds():
-    assert BatchTally(updated=9, failed=1).task_result() == {"message": "updated 9, failed 1"}
+    assert BatchTally(updated=9, failed=1).task_result() == {"message": "successful:updated 9, failed 1"}
 
 
 def test_a_run_that_went_wrong_for_exactly_half_still_succeeds():
-    assert BatchTally(updated=2, unmatched=1, failed=1).task_result() == {"message": "updated 2, unmatched 1, failed 1"}
+    assert BatchTally(updated=2, unmatched=1, failed=1).task_result() == {
+        "message": "successful:updated 2, unmatched 1, failed 1"
+    }
 
 
 def test_a_run_that_went_wrong_for_most_allocations_fails():
@@ -48,7 +50,7 @@ def test_unmatched_allocations_count_against_the_run():
 
 
 def test_skipped_allocations_count_neither_way():
-    assert BatchTally(updated=1, skipped=50).task_result() == {"message": "updated 1, skipped 50"}
+    assert BatchTally(updated=1, skipped=50).task_result() == {"message": "successful:updated 1, skipped 50"}
     with pytest.raises(BatchMostlyFailedError):
         BatchTally(failed=1, skipped=50).task_result()
 
@@ -82,7 +84,9 @@ def test_vast_quotas_count_each_allocation(vast_quota_mocks, storage_resource, m
         make_allocation(storage_resource, attributes={VAST_PATH: path})
     make_allocation(storage_resource)
 
-    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 3, unmatched 1, skipped 1"}
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {
+        "message": "successful:updated 3, unmatched 1, skipped 1"
+    }
 
 
 def test_one_bad_vast_path_does_not_stop_the_rest(vast_quota_mocks, storage_resource, make_allocation):
@@ -90,7 +94,7 @@ def test_one_bad_vast_path_does_not_stop_the_rest(vast_quota_mocks, storage_reso
     for path in ("/projects//good", "/projects/good", "/projects/good"):
         make_allocation(storage_resource, attributes={VAST_PATH: path})
 
-    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 2, failed 1"}
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "successful:updated 2, failed 1"}
 
 
 def test_vast_is_asked_for_its_quotas_once_per_run(vast_quota_mocks, storage_resource, make_allocation):
@@ -119,7 +123,9 @@ def test_a_path_vast_has_no_quota_for_is_unmatched_not_failed(vast_quota_mocks, 
     for path in ("/projects/good", "/projects/good", "/projects/good", "/projects/gone", "/projects//bad"):
         make_allocation(storage_resource, attributes={VAST_PATH: path})
 
-    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 3, unmatched 1, failed 1"}
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {
+        "message": "successful:updated 3, unmatched 1, failed 1"
+    }
 
 
 def test_a_missing_quota_is_still_a_value_error():
@@ -147,7 +153,9 @@ def test_truenas_quotas_count_each_allocation(mock_client, mock_update, storage_
     make_allocation(storage_resource, attributes={"truenas_path": "/mnt/t2/missing"})
     make_allocation(storage_resource)
 
-    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 2, unmatched 1, skipped 1"}
+    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {
+        "message": "successful:updated 2, unmatched 1, skipped 1"
+    }
 
 
 @patch("storage.truenas.update_allocation_attribute_value")
@@ -163,7 +171,9 @@ def test_a_path_truenas_has_no_dataset_for_is_unmatched_not_failed(
     for path in ("/mnt/t2/a", "/mnt/t2/a", "/mnt/t2/a", "/mnt/t2/missing", "/mnt/t2/no_quota"):
         make_allocation(storage_resource, attributes={"truenas_path": path})
 
-    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 3, unmatched 1, failed 1"}
+    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {
+        "message": "successful:updated 3, unmatched 1, failed 1"
+    }
 
 
 @patch("storage.truenas.update_allocation_attribute_value")
@@ -172,7 +182,7 @@ def test_a_truenas_path_with_stray_spaces_still_matches(mock_client, mock_update
     mock_client.return_value.get_all_datasets.return_value = [{"mountpoint": "/mnt/t2/a", "quota": 10**12}]
     make_allocation(storage_resource, attributes={"truenas_path": " /mnt/t2/a \n"})
 
-    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "updated 1"}
+    assert truenas.get_quotas_batch(storage_resource.pk, "truenas") == {"message": "successful:updated 1"}
 
 
 # --- Starfish usage ----------------------------------------------------------------------------
@@ -195,7 +205,7 @@ def test_a_starfish_volume_that_fails_fails_only_its_own_allocations(
     make_allocation(storage_resource, attributes={SF_PATH: "also_up:/lab"})
     make_allocation(storage_resource, attributes={SF_PATH: "down:/lab"})
 
-    assert starfish.get_storage_usage_batch(storage_resource.pk, "sf") == {"message": "updated 2, failed 1"}
+    assert starfish.get_storage_usage_batch(storage_resource.pk, "sf") == {"message": "successful:updated 2, failed 1"}
 
 
 @patch("storage.starfish.update_allocation_attribute_value")
@@ -254,7 +264,7 @@ def test_allocations_without_a_path_are_still_only_skipped(vast_quota_mocks, sto
     make_allocation(storage_resource)
     make_allocation(storage_resource)
 
-    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 1, skipped 2"}
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "successful:updated 1, skipped 2"}
 
 
 # --- the batches that queue one task per resource ----------------------------------------------
@@ -282,7 +292,7 @@ def test_a_dispatcher_reports_what_it_queued(mock_async, dispatcher, handlers):
     with patch("storage.tasks.STORAGE_LOG_ONLY", False):
         result = dispatcher()
 
-    assert result == {"message": "queued 1: hpc-storage; no task configured for tier2"}
+    assert result == {"message": "successful:queued 1: hpc-storage; no task configured for tier2"}
     mock_async.assert_called_once()
 
 
@@ -291,5 +301,7 @@ def test_a_dispatcher_in_log_only_mode_says_nothing_was_queued(mock_async, handl
     with patch("storage.tasks.STORAGE_LOG_ONLY", True):
         result = tasks.get_storage_quotas_batch()
 
-    assert result == {"message": "would have queued (STORAGE_LOG_ONLY) 1: hpc-storage; no task configured for tier2"}
+    assert result == {
+        "message": "successful:would have queued (STORAGE_LOG_ONLY) 1: hpc-storage; no task configured for tier2"
+    }
     mock_async.assert_not_called()

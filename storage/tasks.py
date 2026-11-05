@@ -16,6 +16,7 @@ from storage.constants import (
 from storage.directory_structure.tasks import create_folders
 from storage.models import StorageHandler
 from storage.utils import (
+    build_task_result,
     get_allocation_group,
     get_attribute_value,
     get_client_config,
@@ -96,7 +97,7 @@ def _dispatch_result(queued: list, unconfigured: list) -> dict:
     message = f"{verb} {len(queued)}: {', '.join(queued) or 'none'}"
     if unconfigured:
         message += f"; no task configured for {', '.join(unconfigured)}"
-    return {"message": message}
+    return build_task_result(ProvisionStatus.SUCCESSFUL, message)
 
 
 def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_attribute_change_id=None):
