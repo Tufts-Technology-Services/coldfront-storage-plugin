@@ -1,8 +1,9 @@
 import logging
 from pathlib import Path
 
-from coldfront.core.allocation.models import Allocation
+from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront_utils.tasks import reschedulable
+from django_q.models import Task
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, ProvisionStatus
 from storage.directory_structure import PosixDeploymentRunner
@@ -21,7 +22,36 @@ from storage.utils import (
 logger = logging.getLogger(__name__)
 
 
-@reschedulable(retry_on=(ActiveDirectoryNotReadyError, ClusterDirectoryNotVisibleError), retries=5, wait=3)
+def folder_task_name(allocation_pk: int, structure_type: str) -> str:
+    """The name every run of create_folders gets on the task report: create_folders_<type>_<directory>.
+
+    <directory> is the last part of the allocation's cluster path, or allocation_<pk> if it has none.
+    All the runs for one allocation share the name, so its retries can be found together; django-q
+    doesn't need task names to be unique. Cut to the length django-q stores.
+    """
+    cluster_path = (
+        AllocationAttribute.objects.filter(
+            allocation_id=allocation_pk, allocation_attribute_type__name=CLUSTER_PATH_ATTRIBUTE_NAME
+        )
+        .values_list("value", flat=True)
+        .first()
+    )
+    directory = Path((cluster_path or "").strip()).name or f"allocation_{allocation_pk}"
+    return f"create_folders_{structure_type}_{directory}"[: Task._meta.get_field("name").max_length]
+
+
+def folder_task_options(allocation_pk: int, structure_type: str, **_) -> dict:
+    """django-q options for a run of create_folders. Build them for each call: async_task pops
+    task_name out of the dict it's given."""
+    return {"task_name": folder_task_name(allocation_pk, structure_type)}
+
+
+@reschedulable(
+    retry_on=(ActiveDirectoryNotReadyError, ClusterDirectoryNotVisibleError),
+    retries=5,
+    wait=3,
+    q_options=folder_task_options,
+)
 def create_folders(allocation_pk: int, structure_type: str):
     """Create an allocation's folders on the cluster, waiting for AD and the cluster directory.
 

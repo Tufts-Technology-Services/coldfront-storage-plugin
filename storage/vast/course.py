@@ -41,7 +41,7 @@ def create_course_share(
     ready (@reschedulable); a call can pass retries= and wait= to change that.
     """
 
-    # before any VAST calls, so waiting for AD doesn't repeat them on every retry
+    # before any VAST calls, so waiting for AD doesn't repeat them on every retry. raises ActiveDirectoryNotReadyError if AD isn't ready
     lookup_ad_entries(owner, group)
     # skipped once VAST is done, so waiting for the cluster directory doesn't repeat them either
     if not share_provisioned:
