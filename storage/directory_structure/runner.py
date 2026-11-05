@@ -1,10 +1,10 @@
 from pyinfra.api import Config, Inventory, State
 from pyinfra.api.connect import connect_all, disconnect_all
-from pyinfra.api.operations import run_ops
 from pyinfra.api.deploy import add_deploy
 from pyinfra.api.exceptions import PyinfraError
+from pyinfra.api.operations import run_ops
 
-from storage.constants import POSIX_FILESYSTEM_HOST, POSIX_FILESYSTEM_USER, POSIX_FILESYSTEM_SSH_KEY
+from storage.constants import POSIX_FILESYSTEM_HOST, POSIX_FILESYSTEM_SSH_KEY, POSIX_FILESYSTEM_USER
 
 
 class PosixDeploymentRunner:
@@ -18,18 +18,21 @@ class PosixDeploymentRunner:
         if POSIX_FILESYSTEM_HOST == "localhost":
             return self.__pyinfra_run(self.deployments, (["@local"], {}))
         else:
-            return self.__pyinfra_run(self.deployments, ([POSIX_FILESYSTEM_HOST], {}), ssh_user=POSIX_FILESYSTEM_USER, ssh_key=POSIX_FILESYSTEM_SSH_KEY)
-
+            return self.__pyinfra_run(
+                self.deployments,
+                ([POSIX_FILESYSTEM_HOST], {}),
+                ssh_user=POSIX_FILESYSTEM_USER,
+                ssh_key=POSIX_FILESYSTEM_SSH_KEY,
+            )
 
     def __pyinfra_run(self, deployments, hosts, ssh_user=None, ssh_key=None) -> list:
         override_data = {}
         if ssh_user:
-            override_data['ssh_user'] = ssh_user
+            override_data["ssh_user"] = ssh_user
         if ssh_key:
-            override_data['ssh_key'] = ssh_key
+            override_data["ssh_key"] = ssh_key
 
-        state = State(inventory=Inventory(hosts, override_data=override_data),
-                    config=Config(SUDO=True))
+        state = State(inventory=Inventory(hosts, override_data=override_data), config=Config(SUDO=True))
         try:
             connect_all(state)
             for deployment in deployments:

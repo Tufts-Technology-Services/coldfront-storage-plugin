@@ -12,43 +12,43 @@ from django.views.generic import View
 from storage.constants import STORAGE_RESOURCE_TYPE_NAME
 
 # attributes are not necessarily unique per allocation/project, so repeated values share a cell
-MULTI_VALUE_SEPARATOR = '; '
+MULTI_VALUE_SEPARATOR = "; "
 
-ALLOCATION_ATTRIBUTE_COLUMN_PREFIX = 'allocation_attribute: '
-PROJECT_ATTRIBUTE_COLUMN_PREFIX = 'project_attribute: '
+ALLOCATION_ATTRIBUTE_COLUMN_PREFIX = "allocation_attribute: "
+PROJECT_ATTRIBUTE_COLUMN_PREFIX = "project_attribute: "
 
 BASE_COLUMNS = [
-    'allocation_id',
-    'allocation_status',
-    'resources',
-    'quantity',
-    'start_date',
-    'end_date',
-    'is_locked',
-    'is_changeable',
-    'description',
-    'justification',
-    'created',
-    'modified',
-    'project_id',
-    'project_title',
-    'project_code',
-    'project_status',
-    'project_institution',
-    'project_field_of_science',
-    'project_pi_username',
-    'project_pi_name',
-    'project_pi_email',
+    "allocation_id",
+    "allocation_status",
+    "resources",
+    "quantity",
+    "start_date",
+    "end_date",
+    "is_locked",
+    "is_changeable",
+    "description",
+    "justification",
+    "created",
+    "modified",
+    "project_id",
+    "project_title",
+    "project_code",
+    "project_status",
+    "project_institution",
+    "project_field_of_science",
+    "project_pi_username",
+    "project_pi_name",
+    "project_pi_email",
 ]
 
 
 def format_datetime(value):
     """Render a datetime in local time, tolerating naive values when USE_TZ is off."""
     if value is None:
-        return ''
+        return ""
     if timezone.is_aware(value):
         value = timezone.localtime(value)
-    return value.isoformat(timespec='seconds')
+    return value.isoformat(timespec="seconds")
 
 
 def base_values(allocation):
@@ -64,7 +64,7 @@ def base_values(allocation):
         allocation.end_date,
         allocation.is_locked,
         allocation.is_changeable,
-        allocation.description or '',
+        allocation.description or "",
         allocation.justification,
         format_datetime(allocation.created),
         format_datetime(allocation.modified),
@@ -103,18 +103,18 @@ class StorageAllocationExportView(LoginRequiredMixin, UserPassesTestMixin, View)
         return (
             Allocation.objects.filter(resources__resource_type__name=STORAGE_RESOURCE_TYPE_NAME)
             .select_related(
-                'status',
-                'project',
-                'project__pi',
-                'project__status',
-                'project__field_of_science',
+                "status",
+                "project",
+                "project__pi",
+                "project__status",
+                "project__field_of_science",
             )
             .prefetch_related(
-                'resources',
-                'allocationattribute_set__allocation_attribute_type',
-                'project__projectattribute_set__proj_attr_type',
+                "resources",
+                "allocationattribute_set__allocation_attribute_type",
+                "project__projectattribute_set__proj_attr_type",
             )
-            .order_by('pk')
+            .order_by("pk")
             .distinct()
         )
 
@@ -124,7 +124,7 @@ class StorageAllocationExportView(LoginRequiredMixin, UserPassesTestMixin, View)
             AllocationAttribute.objects.filter(
                 allocation__resources__resource_type__name=STORAGE_RESOURCE_TYPE_NAME,
             )
-            .values_list('allocation_attribute_type__name', flat=True)
+            .values_list("allocation_attribute_type__name", flat=True)
             .distinct()
         )
 
@@ -134,7 +134,7 @@ class StorageAllocationExportView(LoginRequiredMixin, UserPassesTestMixin, View)
             ProjectAttribute.objects.filter(
                 project__allocation__resources__resource_type__name=STORAGE_RESOURCE_TYPE_NAME,
             )
-            .values_list('proj_attr_type__name', flat=True)
+            .values_list("proj_attr_type__name", flat=True)
             .distinct()
         )
 
@@ -159,15 +159,15 @@ class StorageAllocationExportView(LoginRequiredMixin, UserPassesTestMixin, View)
             )
             yield writer.writerow(
                 base_values(allocation)
-                + [allocation_attributes.get(name, '') for name in allocation_attribute_names]
-                + [project_attributes.get(name, '') for name in project_attribute_names]
+                + [allocation_attributes.get(name, "") for name in allocation_attribute_names]
+                + [project_attributes.get(name, "") for name in project_attribute_names]
             )
 
     def get(self, request, *args, **kwargs):
-        filename = 'storage_allocations_{}.csv'.format(timezone.localtime().strftime('%Y%m%d-%H%M%S'))
+        filename = "storage_allocations_{}.csv".format(timezone.localtime().strftime("%Y%m%d-%H%M%S"))
         response = StreamingHttpResponse(
             self.rows(self.get_allocation_attribute_names(), self.get_project_attribute_names()),
-            content_type='text/csv',
+            content_type="text/csv",
         )
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response

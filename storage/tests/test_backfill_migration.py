@@ -88,9 +88,7 @@ def run_backfill():
 def allocation_with_state(storage_resource, make_allocation, state_type):
     def make(value):
         allocation = make_allocation(storage_resource)
-        AllocationAttribute.objects.create(
-            allocation=allocation, allocation_attribute_type=state_type, value=value
-        )
+        AllocationAttribute.objects.create(allocation=allocation, allocation_attribute_type=state_type, value=value)
         return allocation
 
     return make
@@ -140,9 +138,7 @@ def test_backfill_leaves_unrecognised_values_untouched(allocation_with_state, ru
     assert message_of(allocation) is None
 
 
-def test_backfill_does_not_clear_a_message_the_tasks_wrote(
-    allocation_with_state, run_backfill, make_attribute_type
-):
+def test_backfill_does_not_clear_a_message_the_tasks_wrote(allocation_with_state, run_backfill, make_attribute_type):
     """A row already in the new format keeps its reason."""
     allocation = allocation_with_state(str(ProvisionStatus.FAILED))
     message_type = make_attribute_type(SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME)
@@ -199,7 +195,4 @@ def test_backfill_covers_quota_update_as_well(storage_resource, make_allocation,
     run_backfill()
 
     assert allocation.get_attribute(QUOTA_UPDATE_STATE_ATTRIBUTE_NAME) == ProvisionStatus.FAILED
-    assert (
-        allocation.get_attribute(QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME)
-        == "no quota update task or client configured"
-    )
+    assert allocation.get_attribute(QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME) == "no quota update task or client configured"

@@ -5,28 +5,27 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
         # the oldest resource migration that defines Resource, rather than the newest one
         # makemigrations picked, so that this still resolves on the oldest supported ColdFront
-        ('resource', '0002_auto_20191017_1141'),
+        ("resource", "0002_auto_20191017_1141"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='StorageHandler',
+            name="StorageHandler",
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('get_quotas_batch_task', models.CharField(blank=True, max_length=255, null=True)),
-                ('set_quota_task', models.CharField(blank=True, max_length=255, null=True)),
-                ('quota_client_id', models.CharField(blank=True, max_length=255, null=True)),
-                ('create_share_task', models.CharField(blank=True, max_length=255, null=True)),
-                ('create_client_id', models.CharField(blank=True, max_length=255, null=True)),
-                ('get_usage_batch_task', models.CharField(blank=True, max_length=255, null=True)),
-                ('usage_client_id', models.CharField(blank=True, max_length=255, null=True)),
-                ('resource', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to='resource.resource')),
+                ("id", models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("get_quotas_batch_task", models.CharField(blank=True, max_length=255, null=True)),
+                ("set_quota_task", models.CharField(blank=True, max_length=255, null=True)),
+                ("quota_client_id", models.CharField(blank=True, max_length=255, null=True)),
+                ("create_share_task", models.CharField(blank=True, max_length=255, null=True)),
+                ("create_client_id", models.CharField(blank=True, max_length=255, null=True)),
+                ("get_usage_batch_task", models.CharField(blank=True, max_length=255, null=True)),
+                ("usage_client_id", models.CharField(blank=True, max_length=255, null=True)),
+                ("resource", models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to="resource.resource")),
             ],
         ),
     ]

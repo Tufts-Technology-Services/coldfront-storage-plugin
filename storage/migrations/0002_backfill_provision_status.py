@@ -71,9 +71,7 @@ def _message_attribute_type(apps, name):
     text_type = AttributeType.objects.filter(name="Text").first()
     if text_type is None:
         text_type = AttributeType.objects.create(name="Text")
-    return AllocationAttributeType.objects.create(
-        name=name, attribute_type=text_type, is_private=True
-    )
+    return AllocationAttributeType.objects.create(name=name, attribute_type=text_type, is_private=True)
 
 
 def _set_message(AllocationAttribute, allocation_id, message_type, message):

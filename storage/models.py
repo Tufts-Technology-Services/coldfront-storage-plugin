@@ -1,6 +1,6 @@
-from django.db import models
 from coldfront.core.resource.models import Resource
-    
+from django.db import models
+
 
 class StorageHandler(models.Model):
     resource = models.OneToOneField(Resource, on_delete=models.CASCADE)

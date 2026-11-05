@@ -1,13 +1,13 @@
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.core.paginator import Paginator, PageNotAnInteger, EmptyPage
-from django.db.models import Q, Prefetch, QuerySet
-from django.views.generic import ListView
-from django.shortcuts import get_object_or_404
 from datetime import date
+
 from coldfront.core.allocation.models import Allocation, AllocationAttribute
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
+from django.db.models import Prefetch, Q, QuerySet
+from django.shortcuts import get_object_or_404
+from django.views.generic import ListView
 
 from storage.forms import StorageAuditSearchForm
-
 
 
 class StorageAuditListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
@@ -23,13 +23,13 @@ class StorageAuditListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
         if self.request.user.has_perm("allocation.can_view_all_allocations"):
             return True
         return False
-    
+
     def get_quota_attr_prefetch(self) -> Prefetch:
         """Return Prefetch for allocation quota attribute."""
         return Prefetch(
-            'allocationattribute_set',
+            "allocationattribute_set",
             queryset=AllocationAttribute.objects.filter(allocation_attribute_type__name=QUOTA_ATTR_NAME).only(
-                'allocation_id', 'value'
+                "allocation_id", "value"
             ),
             to_attr=QUOTA_ATTRIBUTE_NAME,
         )
@@ -55,11 +55,9 @@ class StorageAuditListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
                     "status",
                 )
                 .prefetch_related(self.get_quota_attr_prefetch())
-
                 .filter(resources__resource_type__name="Storage")
                 .order_by(order_by)
             )
-
 
             # Project Title
             if data.get("project"):

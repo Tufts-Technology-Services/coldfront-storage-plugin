@@ -10,5 +10,5 @@ __all__ = [
     "create_share",
     "create_smb_share",
     "create_course_share",
-    "create_project_share"
+    "create_project_share",
 ]

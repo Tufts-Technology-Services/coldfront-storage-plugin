@@ -213,9 +213,7 @@ def test_success_clears_a_previous_failure_message(mock_provision, allocation):
 @patch("storage.vast.project.create_project_share_file_structure")
 @patch("storage.vast.project.check_folder")
 @patch("storage.vast.project.provision_share")
-def test_waiting_records_what_it_is_waiting_for(
-    mock_provision, mock_check, mock_structure, mock_schedule, allocation
-):
+def test_waiting_records_what_it_is_waiting_for(mock_provision, mock_check, mock_structure, mock_schedule, allocation):
     mock_structure.side_effect = GroupNotFoundError("Could not find group with GID 'g' in AD")
 
     project.create_project_share("/projects/p", 10, "owner", "group", "hpc", allocation.pk, retries=2)

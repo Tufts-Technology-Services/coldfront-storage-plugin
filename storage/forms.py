@@ -1,7 +1,8 @@
-from django import forms
-from django.db.models.functions import Lower
 from coldfront.core.allocation.models import AllocationAttribute, AllocationAttributeType, AllocationStatusChoice
 from coldfront.core.resource.models import Resource
+from django import forms
+from django.db.models.functions import Lower
+
 from .constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 
 
@@ -11,8 +12,8 @@ class StorageAllocationRequestDetailsForm(forms.Form):
     quota_request = forms.DecimalField(
         label=QUOTA_ATTRIBUTE_NAME,
         required=True,
-        widget=forms.NumberInput(attrs={'step': '0.1', 'min': '0.1', 'class': 'form-control'}),
-        help_text=f'Specify the storage quota in {STORAGE_PLUGIN_STORAGE_UNITS} for your allocation. (minimum 0.1)',
+        widget=forms.NumberInput(attrs={"step": "0.1", "min": "0.1", "class": "form-control"}),
+        help_text=f"Specify the storage quota in {STORAGE_PLUGIN_STORAGE_UNITS} for your allocation. (minimum 0.1)",
     )
 
 
@@ -40,7 +41,9 @@ class StorageAuditSearchForm(forms.Form):
     username = forms.CharField(label="Username", max_length=100, required=False)
     resource_name = forms.ModelMultipleChoiceField(
         label="Resource Name",
-        queryset=Resource.objects.select_related("resource_type").filter(is_allocatable=True, resource_type__name__iexact="storage").order_by(Lower("name")),
+        queryset=Resource.objects.select_related("resource_type")
+        .filter(is_allocatable=True, resource_type__name__iexact="storage")
+        .order_by(Lower("name")),
         required=False,
     )
     allocation_attribute_name = forms.ModelChoiceField(

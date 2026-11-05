@@ -4,13 +4,13 @@ from . import views
 
 urlpatterns = [
     path(
-        'allocation/<int:pk>/storage-request-details/',
+        "allocation/<int:pk>/storage-request-details/",
         views.StorageAllocationRequestDetailsView.as_view(),
-        name='storage-allocation-request-details',
+        name="storage-allocation-request-details",
     ),
     path(
-        'allocation/export/',
+        "allocation/export/",
         views.StorageAllocationExportView.as_view(),
-        name='storage-allocation-export',
+        name="storage-allocation-export",
     ),
 ]

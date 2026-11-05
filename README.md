@@ -102,19 +102,19 @@ STORAGE_PLUGIN_CLIENTS = {
         "user": "vast_user",
         "password": "vast_password",
         "include_share": False,
-        "view_policy_id": 7, 
-        "protection_policy_id": 10, 
+        "view_policy_id": 7,
+        "protection_policy_id": 10,
         "tenant_id": 1,
         "protocols": ["NFS"],
-        "quota_margin_percent": 10, # percentage to add as a margin to the quota between soft and hard limits
+        "quota_margin_percent": 10,  # percentage to add as a margin to the quota between soft and hard limits
         "snapshot_name_template": "{0}_proj_snap",
-        "native_path_attribute_name": "vast_path", # name of the allocation attribute that will hold the native path value for this client
+        "native_path_attribute_name": "vast_path",  # name of the allocation attribute that will hold the native path value for this client
     },
     "truenas": {
         "host": "truenas_host",
         "api_key": "truenas_api_key",
-        "native_path_attribute_name": "truenas_path", # name of the allocation attribute that will hold the native path value for this client
-    } 
+        "native_path_attribute_name": "truenas_path",  # name of the allocation attribute that will hold the native path value for this client
+    },
 }
 ```
 
@@ -175,7 +175,9 @@ plugins' tasks that use it:
 ```python
 {"message": "successful:"}
 {"message": "scheduled:Group g is in AD but has no GID yet"}
-{"message": "scheduled:Directory /cluster/tufts/lab is not visible on host yet. (runs again in 3 minutes, 4 retries left)"}
+{
+    "message": "scheduled:Directory /cluster/tufts/lab is not visible on host yet. (runs again in 3 minutes, 4 retries left)"
+}
 {"message": "successful:created hpc_project folders for allocation 2326"}
 {"message": "successful:updated 412, unmatched 2, skipped 9, failed 1"}
 ```
@@ -213,13 +215,13 @@ from coldfront_utils.signals import share_creation_failed, share_creation_succes
 from django.dispatch import receiver
 from storage.vast import create_project_share
 
+
 @receiver(share_creation_successful, sender=create_project_share)
-def announce(sender, allocation, result, **kwargs):
-    ...  # result is the dict the task returned
+def announce(sender, allocation, result, **kwargs): ...  # result is the dict the task returned
+
 
 @receiver(share_creation_failed)  # every share creation task
-def report(sender, allocation, message, exception, **kwargs):
-    ...
+def report(sender, allocation, message, exception, **kwargs): ...
 ```
 
 A signal is sent after its state has been recorded, so a receiver sees the allocation as the task

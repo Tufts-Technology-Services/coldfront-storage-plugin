@@ -312,14 +312,16 @@ def run_through_django_q(func, allocation):
     from django_q.tasks import _sync
 
     tag = uuid()
-    pack = SignedPackage.dumps({
-        "id": tag[1],
-        "name": tag[0],
-        "func": func,
-        "args": (),
-        "kwargs": {"allocation_pk": allocation.pk},
-        "started": timezone.now(),
-    })
+    pack = SignedPackage.dumps(
+        {
+            "id": tag[1],
+            "name": tag[0],
+            "func": func,
+            "args": (),
+            "kwargs": {"allocation_pk": allocation.pk},
+            "started": timezone.now(),
+        }
+    )
     return Task.objects.get(id=_sync(pack))
 
 
