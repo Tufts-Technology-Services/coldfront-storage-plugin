@@ -17,12 +17,21 @@ class ClusterDirectoryNotVisibleError(Exception):
     """
 
 
+def require_subdirectory_arguments(parent_directory: Path | None, subdirectory_name: str | None) -> None:
+    """Check both parts of a subdirectory's path were given, before anything joins them."""
+    if parent_directory is None or subdirectory_name is None:
+        raise PyinfraError("Parent directory and subdirectory name must be provided.")
+
+
 def require_existing_directory(path: Path) -> None:
     """Check on the host that `path` is an existing directory, before any operation is added for it.
 
     Raises ClusterDirectoryNotVisibleError if nothing is there yet, which callers retry, and
     NotADirectoryError if something other than a directory is, which they don't.
     """
+    # pyinfra's Directory fact runs stat without -L, so it doesn't follow symlinks: a symlink to a
+    # directory comes back as False and raises NotADirectoryError here. Symlinked paths aren't
+    # supported: a cluster path has to name the directory itself.
     directory_info = host.get_fact(Directory, path=path.as_posix())
     if directory_info is None:
         raise ClusterDirectoryNotVisibleError(f"Directory {path} is not visible on {host.name} yet.")
@@ -37,8 +46,7 @@ def create_subdirectory(
     group: str = None,
     mode: str = "2770",
 ):
-    if parent_directory is None or subdirectory_name is None:
-        raise PyinfraError("Parent directory and subdirectory name must be provided.")
+    require_subdirectory_arguments(parent_directory, subdirectory_name)
 
     subdir = parent_directory / subdirectory_name
     try:

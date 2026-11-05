@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pyinfra.api.deploy import deploy
 
-from .utils import create_subdirectory, require_existing_directory
+from .utils import create_subdirectory, require_existing_directory, require_subdirectory_arguments
 
 
 @deploy("Create project directory")
@@ -14,6 +14,7 @@ def deploy_project_directory(
     project_members: list[str] = None,
     require_existing: bool = True,
 ):
+    require_subdirectory_arguments(parent_directory, project_directory_name)
     project_dir = parent_directory / project_directory_name
 
     # requires the project directory to exist before proceeding if require_existing is True

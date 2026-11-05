@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pyinfra.api import deploy
 
-from .utils import create_subdirectory, require_existing_directory
+from .utils import create_subdirectory, require_existing_directory, require_subdirectory_arguments
 
 
 @deploy("Create course directory")
@@ -15,6 +15,8 @@ def deploy_course_directory(
     admin_group: str = None,
     require_existing: bool = True,
 ):
+    require_subdirectory_arguments(parent_directory, course_directory_name)
+
     # requires the course directory to exist before proceeding if require_existing is True
     if require_existing:
         require_existing_directory(parent_directory / course_directory_name)

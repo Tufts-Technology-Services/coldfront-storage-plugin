@@ -14,6 +14,8 @@ from pyinfra.facts.files import Directory
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, ProvisionStatus
 from storage.directory_structure import tasks as directory_tasks
+from storage.directory_structure.course import deploy_course_directory
+from storage.directory_structure.hpc_projects import deploy_project_directory
 from storage.directory_structure.utils import ClusterDirectoryNotVisibleError, require_existing_directory
 from storage.tests.helpers import message_of, state_of
 from storage.vast import course, project
@@ -146,3 +148,21 @@ def test_folder_creation_fails_once_its_retries_run_out(
         directory_tasks.create_folders(allocation.pk, "hpc_project", retries=0)
 
     mock_schedule.assert_not_called()
+
+
+# --- the deploys check their arguments before using them -----------------------------------------
+
+DEPLOYS_WITHOUT_A_DIRECTORY_NAME = [
+    pytest.param(deploy_project_directory, {"project_directory_name": None}, id="project"),
+    pytest.param(deploy_course_directory, {"course_directory_name": None}, id="course"),
+]
+
+
+@pytest.mark.parametrize("deploy_function, missing", DEPLOYS_WITHOUT_A_DIRECTORY_NAME)
+def test_a_deploy_without_its_directory_name_says_so(fake_host, deploy_function, missing):
+    """Not a TypeError from joining None onto the parent path."""
+    # _inner is the undecorated function, so no pyinfra deploy state is needed
+    with pytest.raises(PyinfraError, match="subdirectory name must be provided"):
+        deploy_function._inner(parent_directory=PROJECT_DIR.parent, owner="o", group="g", **missing)
+
+    fake_host.get_fact.assert_not_called()
