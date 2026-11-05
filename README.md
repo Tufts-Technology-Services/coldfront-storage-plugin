@@ -7,7 +7,7 @@ The Storage Plugin provides an interface for managing storage within the ColdFro
 * get_usage_batch_task: Get storage usage for a batch of allocations
 * get_quotas_batch_task: Get storage quota for a batch of allocations
 * set_quota_task: Set storage quota for an allocation
-* create_storage_task: Create storage for an allocation
+* create_share_task: Create storage for an allocation
 
 ## Implemented Clients
 * VAST: https://vastdata.com/
@@ -44,16 +44,26 @@ if ENV.bool("PLUGIN_USER_MANAGEMENT", default=False) and "storage" in INSTALLED_
 PLUGIN_USER_MANAGEMENT=False  # set to True to enable the plugin
 STORAGE_PLUGIN_STORAGE_UNITS=TB  # units for storage attributes (e.g., TB, GB)
 QUOTA_ATTRIBUTE_NAME="Storage Quota (TB)"  # name of the allocation attribute that holds the storage quota value
+QUOTA_IN_BYTES_ATTRIBUTE_NAME=reported_quota_bytes  # name of the allocation attribute that holds the quota the storage system reports, in bytes
 QUOTA_REPORT_DATE_ATTRIBUTE_NAME=quota_report_date  # name of the allocation attribute that holds the date when the quota was last updated
-USAGE_IN_BYTES_ATTRIBUTE_NAME=usage_in_bytes  # name of the allocation attribute that holds the current storage usage in bytes
+USAGE_IN_BYTES_ATTRIBUTE_NAME=reported_usage_bytes  # name of the allocation attribute that holds the current storage usage in bytes
 USAGE_REPORT_DATE_ATTRIBUTE_NAME=usage_report_date  # name of the allocation attribute that holds the date when the usage was last updated
+USAGE_MATCH_ATTRIBUTE_NAME=usage_source_matched  # name of the allocation attribute that records whether the usage task found the allocation's path in the storage system
+QUOTA_MATCH_ATTRIBUTE_NAME=quota_source_matched  # name of the allocation attribute for whether the quota task found the allocation's path (not written yet)
+CLUSTER_PATH_ATTRIBUTE_NAME="Storage Path"  # name of the allocation attribute that holds the allocation's path on the cluster, used by folder creation
 GROUP_ATTRIBUTE_NAME=Group  # name of the group attribute that holds your unix group name
+SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME=share_creation_task_id  # name of the allocation attribute that holds the id of the share creation task
 SHARE_CREATION_STATE_ATTRIBUTE_NAME=share_creation_state  # name of the allocation attribute that holds the share creation state (one of the ProvisionStatus values)
 SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME=share_creation_message  # name of the allocation attribute that holds the reason for the current share creation state
+QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME=quota_update_task_id  # name of the allocation attribute that holds the id of the quota update task
 QUOTA_UPDATE_STATE_ATTRIBUTE_NAME=quota_update_state  # name of the allocation attribute that holds the quota update state (one of the ProvisionStatus values)
 QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME=quota_update_message  # name of the allocation attribute that holds the reason for the current quota update state
 STORAGE_LOG_ONLY=True  # if True, the plugin will only log actions instead of performing them (for testing purposes)
-ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION=False  # if True, the plugin will add the necessary storage attributes to new allocations based on the storage client configuration
+STORAGE_BATCH_FAILURE_THRESHOLD=0.5  # a batch task fails when more than this share of the allocations it looked up went wrong (see Batch tasks)
+STORAGE_ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION=False  # if True, the plugin will add the necessary storage attributes to new allocations based on the storage client configuration
+POSIX_FILESYSTEM_HOST=localhost  # host that folder creation connects to, where the storage is mounted
+POSIX_FILESYSTEM_USER=  # user to connect to that host as
+POSIX_FILESYSTEM_SSH_KEY=  # path to the SSH private key for that connection
 
 ```
 5. Run migrations to create the necessary database tables for the plugin:
@@ -156,12 +166,17 @@ Both come from the same `_records_task_state()` factory and behave identically. 
 which pair of attributes they record into, which is why there are two of them rather than one: a
 quota update must not overwrite the allocation's share creation state.
 
-Every decorated task returns a dict carrying a `message` of `"<state>:<reason>"`, so the outcome
-is readable from the Django Q task list and not only from the allocation:
+Every task returns a dict carrying a `message` of `"<state>:<reason>"`, so the outcome is readable
+from the Django Q task list and not only from the allocation. They all build it with
+`build_task_result()` in `storage/utils.py`, so the format is the same everywhere: the decorated
+tasks, folder creation, and the batch tasks (see [Batch tasks](#batch-tasks)):
 
 ```python
 {"message": "successful:"}
 {"message": "scheduled:Group g is in AD but has no GID yet"}
+{"message": "scheduled:Directory /cluster/tufts/lab is not visible on host yet. (runs again in 3 minutes, 4 retries left)"}
+{"message": "successful:created hpc_project folders for allocation 2326"}
+{"message": "successful:updated 412, unmatched 2, skipped 9, failed 1"}
 ```
 
 If the task body returns a dict of its own, its keys are carried through alongside `message`; any
@@ -237,12 +252,71 @@ else, so a retry repeats no other work. It raises `UserNotFoundError`, `UIDNotFo
 SMB-only groups, like RStore's, have no POSIX gid, so the SMB share task looks its group up with
 `require_gid=False`: the group must exist, but its gid may be missing.
 
-A task catches `ActiveDirectoryNotReadyError` (and `VastViewNotFoundError`, on VAST) and calls
-`schedule_retry()`, which schedules the task to run again in `wait` minutes with one retry fewer,
-passing its arguments by keyword, or re-raises the error once `retries` reaches 0. A decorated task
-then raises `TaskRetryScheduled`, so its state is `scheduled` until it runs again; folder creation,
-which records no state, just returns. A username that never reaches AD is therefore retried until
-its retries run out (five, five minutes apart, by default) before the task fails.
+A task catches `ActiveDirectoryNotReadyError` (and `VastViewNotFoundError` on VAST, and
+`ClusterDirectoryNotVisibleError` where it creates folders; see below) and calls `schedule_retry()`,
+which schedules the task to run again in `wait` minutes with one retry fewer, passing its arguments
+by keyword, or re-raises the error once `retries` reaches 0. A decorated task then raises
+`TaskRetryScheduled`, so its state is `scheduled` until it runs again. Folder creation records no
+state, so it returns a `scheduled:` message instead, saying when it runs again and how many retries
+are left. A username that never reaches AD is therefore retried until its retries run out before
+the task fails: by default five times, five minutes apart, for the share tasks, and five times,
+three minutes apart, for folder creation.
+
+### Waiting for the cluster directory
+
+Folder creation, both `create_folders` and the folder step of the VAST project and course share
+tasks, uses pyinfra to make the folders on `POSIX_FILESYSTEM_HOST`. It does not make the share's top
+directory: the storage system does, by creating the VAST view. On the cluster host that directory
+is on an autofs mount, where `mkdir` is always refused, and a view that was just created can take a
+while to appear there; autofs also caches a failed lookup for a short time.
+
+So before adding any operation, the deploy checks the directory with `require_existing_directory()`
+in `storage/directory_structure/utils.py`, which reads pyinfra's `Directory` fact:
+
+- Nothing there yet raises `ClusterDirectoryNotVisibleError`, which the task retries as above. It is
+  deliberately not a `PyinfraError`, which the deploy would swallow.
+- Something other than a directory raises `NotADirectoryError`, which is not retried: waiting won't
+  change it. The fact does not follow symlinks, so a symlink to a directory fails this way too.
+  Symlinked cluster paths aren't supported.
+
+The deploy functions take `require_existing=True`, for storage systems where pyinfra should make the
+top directory itself.
+
+The directory is the last step of a VAST share task, so VAST is done by the time it is waited for.
+The retry is scheduled with `share_provisioned=True`, and that run skips `provision_share()` and
+`check_folder()`: waiting for the cluster directory doesn't repeat the VAST calls.
+
+## Batch tasks
+
+The usage and quota batch tasks refresh every allocation on a resource: `get_quotas_batch` for VAST
+and for TrueNAS, and `get_storage_usage_batch` for Starfish. Each counts what happened to every
+allocation and returns the counts as its message, such as
+`successful:updated 412, unmatched 2, skipped 9, failed 1`:
+
+| outcome | meaning |
+|---|---|
+| `updated` | the allocation got fresh usage or quota |
+| `unmatched` | the storage system answered but had nothing for the allocation's path: no Starfish subfolder, VAST quota or TrueNAS dataset |
+| `skipped` | the allocation has no path, or (on Starfish) an invalid one |
+| `failed` | looking the allocation up or updating it raised; on Starfish, a volume whose query fails fails all its allocations |
+
+One allocation going wrong doesn't fail the run. A run fails, raising `BatchMostlyFailedError` with
+the counts, only when `unmatched` plus `failed` is more than `STORAGE_BATCH_FAILURE_THRESHOLD` (by
+default 0.5) of the allocations it looked up. Skipped allocations count neither way: the batches
+cover allocations of every status, and pending, denied and expired ones often have no path.
+
+Instead, each batch first checks that the attribute type it reads paths from exists:
+`native_path_attribute_name` from the client config, or `truenas_path` on TrueNAS. If it doesn't,
+the run fails at once with `PathAttributeTypeMissingError`, before contacting the storage system,
+rather than skipping every allocation and reporting success.
+
+The VAST batch asks VAST for its quota list once per run, cached for an hour, and matches each
+allocation's path against it. If VAST can't be reached, the run fails once with VAST's own error.
+
+The dispatch tasks in `storage/tasks.py`, `get_storage_usage_batch` and `get_storage_quotas_batch`,
+queue one batch task per storage resource. Their message lists the resources they queued for, and
+any with no task configured: `successful:queued 1: hpc-storage; no task configured for tier2`. With
+`STORAGE_LOG_ONLY` it says `would have queued (STORAGE_LOG_ONLY)` instead.
 
 ## Running the tests
 
