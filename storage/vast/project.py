@@ -27,6 +27,7 @@ def create_project_share(
     allocation_pk: int,
     retries=5,
     wait=5,
+    share_provisioned=False,
 ):
     """
     Create a share for the project in VAST and set the appropriate quota. Also creates
@@ -39,16 +40,23 @@ def create_project_share(
         group (str): The group of the project, used for cluster folder group
         client_config_id (str): The client config id to use for connecting to VAST
         allocation_pk (int): The allocation primary key, used for logging and tracking purposes
+        retries (int, optional): The number of retries while AD, the VAST view or the cluster directory
+            isn't ready. Defaults to 5.
+        wait (int, optional): The wait time between retries in minutes. Defaults to 5.
+        share_provisioned (bool, optional): Whether an earlier run already finished on VAST, so this one
+            only creates the folders. Set by the retry that waits for the cluster directory. Defaults to False.
     """
     try:
         # before any VAST calls, so waiting for AD doesn't repeat them on every retry
         lookup_ad_entries(owner, group)
-        provision_share(
-            native_path=native_path.lower(),
-            quota_bytes=quota_bytes,
-            client_config_id=client_config_id,
-        )
-        check_folder(native_path, client_config_id=client_config_id)
+        # skipped once VAST is done, so waiting for the cluster directory doesn't repeat them either
+        if not share_provisioned:
+            provision_share(
+                native_path=native_path.lower(),
+                quota_bytes=quota_bytes,
+                client_config_id=client_config_id,
+            )
+            check_folder(native_path, client_config_id=client_config_id)
         create_project_share_file_structure(
             native_path=native_path, owner=owner, group=group, client_config_id=client_config_id
         )
@@ -64,6 +72,8 @@ def create_project_share(
             group=group,
             client_config_id=client_config_id,
             allocation_pk=allocation_pk,
+            # the cluster directory is the last step: VAST is done by the time it's waited for
+            share_provisioned=share_provisioned or isinstance(e, ClusterDirectoryNotVisibleError),
         )
         raise TaskRetryScheduled(str(e)) from e
 

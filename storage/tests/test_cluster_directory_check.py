@@ -4,7 +4,9 @@ On the cluster host the project directories sit on an autofs mount, where mkdir 
 So before any operation is added for such a directory, the deploy checks the host can see it.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -18,7 +20,9 @@ from storage.directory_structure.course import deploy_course_directory
 from storage.directory_structure.hpc_projects import deploy_project_directory
 from storage.directory_structure.utils import ClusterDirectoryNotVisibleError, require_existing_directory
 from storage.tests.helpers import message_of, state_of
+from storage.utils import ActiveDirectoryNotReadyError
 from storage.vast import course, project
+from storage.vast.errors import VastViewNotFoundError
 
 PROJECT_DIR = Path("/cluster/tufts/desjardinslab")
 
@@ -82,15 +86,23 @@ def share_allocation(storage_resource, make_allocation):
     return make_allocation(storage_resource)
 
 
-def run_share_task_without_the_directory(task, folder_step, allocation, retries):
-    """Run a share task with VAST stubbed out and the cluster directory not visible yet."""
+@contextmanager
+def stubbed_share_steps(task, folder_step):
+    """Stub out VAST and the folder deploy for a share task, and hand back each step's mock."""
     module = task.__module__
     with (
-        patch(f"{module}.provision_share"),
-        patch(f"{module}.check_folder"),
+        patch(f"{module}.provision_share") as provision,
+        patch(f"{module}.check_folder") as check,
         patch(f"{module}.native_path_to_cluster_path", return_value="/cluster/tufts/p", create=True),
-        patch(f"{module}.{folder_step}", side_effect=NOT_VISIBLE),
+        patch(f"{module}.{folder_step}") as folders,
     ):
+        yield SimpleNamespace(provision_share=provision, check_folder=check, folders=folders)
+
+
+def run_share_task_without_the_directory(task, folder_step, allocation, retries):
+    """Run a share task with VAST stubbed out and the cluster directory not visible yet."""
+    with stubbed_share_steps(task, folder_step) as steps:
+        steps.folders.side_effect = NOT_VISIBLE
         return task("/projects/p", 10, "o", "g", "hpc", allocation.pk, retries=retries)
 
 
@@ -101,6 +113,8 @@ def test_a_share_task_waits_for_the_directory(mock_schedule, task, folder_step, 
 
     assert import_string(mock_schedule.call_args.args[0]) is task
     assert mock_schedule.call_args.kwargs["retries"] == 1
+    # VAST is done by now, so the retry only has to create the folders
+    assert mock_schedule.call_args.kwargs["share_provisioned"] is True
     assert state_of(share_allocation) == ProvisionStatus.SCHEDULED
     assert message_of(share_allocation) == str(NOT_VISIBLE)
     assert result == {"message": f"scheduled:{NOT_VISIBLE}"}
@@ -115,6 +129,41 @@ def test_a_share_task_fails_once_its_retries_run_out(mock_schedule, task, folder
     mock_schedule.assert_not_called()
     assert state_of(share_allocation) == ProvisionStatus.FAILED
     assert message_of(share_allocation) == str(NOT_VISIBLE)
+
+
+@pytest.mark.parametrize("task, folder_step", SHARE_TASKS)
+def test_a_retry_after_vast_is_done_only_creates_the_folders(task, folder_step, share_allocation):
+    with stubbed_share_steps(task, folder_step) as steps:
+        result = task("/projects/p", 10, "o", "g", "hpc", share_allocation.pk, share_provisioned=True)
+
+    steps.provision_share.assert_not_called()
+    steps.check_folder.assert_not_called()
+    steps.folders.assert_called_once()
+    assert state_of(share_allocation) == ProvisionStatus.SUCCESSFUL
+    assert result["message"] == "successful:"
+
+
+@pytest.mark.parametrize("task, folder_step", SHARE_TASKS)
+@pytest.mark.parametrize(
+    "failing_step, error, already_provisioned",
+    [
+        pytest.param("lookup_ad_entries", ActiveDirectoryNotReadyError("group g not in AD yet"), False, id="ad"),
+        pytest.param("check_folder", VastViewNotFoundError("Folder not found for /projects/p"), False, id="vast-view"),
+        # check_folder doesn't run once VAST is done, but the AD lookup still does
+        pytest.param(
+            "lookup_ad_entries", ActiveDirectoryNotReadyError("group g not in AD yet"), True, id="ad-after-vast"
+        ),
+    ],
+)
+@patch("storage.utils.schedule")
+def test_a_retry_before_vast_is_done_runs_vast_again(
+    mock_schedule, failing_step, error, already_provisioned, task, folder_step, share_allocation
+):
+    """Only the directory error means VAST finished; a run that had already finished stays that way."""
+    with stubbed_share_steps(task, folder_step), patch(f"{task.__module__}.{failing_step}", side_effect=error):
+        task("/projects/p", 10, "o", "g", "hpc", share_allocation.pk, retries=2, share_provisioned=already_provisioned)
+
+    assert mock_schedule.call_args.kwargs["share_provisioned"] is already_provisioned
 
 
 @pytest.mark.parametrize(
