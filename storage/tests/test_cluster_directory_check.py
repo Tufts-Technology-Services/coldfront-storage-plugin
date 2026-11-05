@@ -107,7 +107,7 @@ def run_share_task_without_the_directory(task, folder_step, allocation, retries)
 
 
 @pytest.mark.parametrize("task, folder_step", SHARE_TASKS)
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 def test_a_share_task_waits_for_the_directory(mock_schedule, task, folder_step, share_allocation):
     result = run_share_task_without_the_directory(task, folder_step, share_allocation, retries=2)
 
@@ -117,11 +117,11 @@ def test_a_share_task_waits_for_the_directory(mock_schedule, task, folder_step, 
     assert mock_schedule.call_args.kwargs["share_provisioned"] is True
     assert state_of(share_allocation) == ProvisionStatus.SCHEDULED
     assert message_of(share_allocation) == str(NOT_VISIBLE)
-    assert result == {"message": f"scheduled:{NOT_VISIBLE}"}
+    assert result["message"] == f"scheduled:{NOT_VISIBLE} (runs again in 5 minutes, 1 retries left)"
 
 
 @pytest.mark.parametrize("task, folder_step", SHARE_TASKS)
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 def test_a_share_task_fails_once_its_retries_run_out(mock_schedule, task, folder_step, share_allocation):
     with pytest.raises(ClusterDirectoryNotVisibleError):
         run_share_task_without_the_directory(task, folder_step, share_allocation, retries=0)
@@ -155,7 +155,7 @@ def test_a_retry_after_vast_is_done_only_creates_the_folders(task, folder_step, 
         ),
     ],
 )
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 def test_a_retry_before_vast_is_done_runs_vast_again(
     mock_schedule, failing_step, error, already_provisioned, task, folder_step, share_allocation
 ):
@@ -169,7 +169,7 @@ def test_a_retry_before_vast_is_done_runs_vast_again(
 @pytest.mark.parametrize(
     "structure_type, folder_step", [("hpc_project", "create_project_folders"), ("hpc_course", "create_course_folders")]
 )
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.directory_structure.tasks.get_allocation_group", return_value="g")
 def test_folder_creation_waits_for_the_directory(
     mock_group, mock_schedule, structure_type, folder_step, storage_resource, make_allocation
@@ -182,10 +182,10 @@ def test_folder_creation_waits_for_the_directory(
     assert import_string(mock_schedule.call_args.args[0]) is directory_tasks.create_folders
     assert mock_schedule.call_args.kwargs["retries"] == 1
     assert mock_schedule.call_args.kwargs["structure_type"] == structure_type
-    assert result == {"message": f"scheduled:{NOT_VISIBLE} (runs again in 3 minutes, 1 retries left)"}
+    assert result["message"] == f"scheduled:{NOT_VISIBLE} (runs again in 3 minutes, 1 retries left)"
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.directory_structure.tasks.create_project_folders", side_effect=NOT_VISIBLE)
 @patch("storage.directory_structure.tasks.get_allocation_group", return_value="g")
 def test_folder_creation_fails_once_its_retries_run_out(

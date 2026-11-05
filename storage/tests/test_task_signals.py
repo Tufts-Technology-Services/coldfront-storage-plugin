@@ -21,8 +21,8 @@ from storage.constants import (
     SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
     ProvisionStatus,
 )
+from storage.tests.helpers import rescheduled_result
 from storage.utils import (
-    TaskRetryScheduled,
     records_quota_update_state,
     records_share_creation_state,
 )
@@ -222,7 +222,7 @@ def test_a_scheduled_retry_sends_nothing(allocation):
 
     @records_share_creation_state
     def task(allocation_pk):
-        raise TaskRetryScheduled("group not in AD yet")
+        return rescheduled_result("group not in AD yet")
 
     with listening_to_all() as received:
         task(allocation.pk)

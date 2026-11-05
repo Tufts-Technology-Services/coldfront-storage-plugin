@@ -7,6 +7,7 @@ behave identically; they differ only in which pair of attributes they record int
 from unittest.mock import patch
 
 import pytest
+from coldfront_utils.tasks import reschedulable
 
 from storage import truenas
 from storage.constants import (
@@ -14,8 +15,15 @@ from storage.constants import (
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     ProvisionStatus,
 )
-from storage.tests.helpers import message_of, quota_message_of, quota_state_of, state_of
-from storage.utils import GroupNotFoundError, TaskRetryScheduled, records_share_creation_state
+from storage.tests.helpers import (
+    RESCHEDULE,
+    message_of,
+    quota_message_of,
+    quota_state_of,
+    rescheduled_result,
+    state_of,
+)
+from storage.utils import GroupNotFoundError, records_share_creation_state
 from storage.vast import vast
 
 
@@ -54,16 +62,47 @@ def test_failure_is_recorded_with_the_reason_and_reraised(allocation):
     assert message_of(allocation) == "it broke"
 
 
-def test_retry_is_recorded_as_waiting_and_not_reraised(allocation):
-    """A scheduled retry is not a failure, so it is swallowed and recorded as waiting."""
+def test_retry_is_recorded_as_waiting(allocation):
+    """A scheduled retry is not a failure: the body returned, and the allocation is waiting."""
 
     @records_share_creation_state
     def task(allocation_pk):
-        raise TaskRetryScheduled("group not in AD yet")
+        return rescheduled_result("group not in AD yet")
 
-    assert task(allocation.pk) == {"message": "scheduled:group not in AD yet"}
+    result = task(allocation.pk)
+
+    assert result == {
+        "message": "scheduled:group not in AD yet (runs again in 5 minutes, 4 retries left)",
+        "reason": "group not in AD yet",
+        "retries_left": 4,
+        "next_run": "2026-11-05T12:05:00+00:00",
+    }
+    # stored by django-q as a plain dict, so no stored result depends on where Rescheduled lives
+    assert type(result) is dict
     assert state_of(allocation) == ProvisionStatus.SCHEDULED
     assert message_of(allocation) == "group not in AD yet"
+
+
+@patch(RESCHEDULE)
+def test_a_reschedulable_task_records_its_wait_and_retries_through_the_decorator(mock_schedule, allocation):
+    _waiting_task(allocation.pk)
+
+    assert state_of(allocation) == ProvisionStatus.SCHEDULED
+    assert message_of(allocation) == "Could not find group g in AD"
+    # the retry calls the decorated task, so the next run records its own state
+    assert mock_schedule.call_args.args[0] == f"{__name__}._waiting_task"
+
+
+@patch(RESCHEDULE)
+def test_a_reschedulable_task_fails_once_its_retries_run_out(mock_schedule, allocation):
+    """A retried call carries retries= and wait=, which the body doesn't take: the decorator still
+    finds the allocation."""
+    with pytest.raises(GroupNotFoundError):
+        _waiting_task(allocation_pk=allocation.pk, retries=0, wait=5)
+
+    mock_schedule.assert_not_called()
+    assert state_of(allocation) == ProvisionStatus.FAILED
+    assert message_of(allocation) == "Could not find group g in AD"
 
 
 def test_body_runs_with_the_state_already_pending(allocation):
@@ -128,7 +167,7 @@ def test_truenas_create_share_records_failure(mock_provision, allocation):
     assert message_of(allocation) == "TrueNAS exploded"
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.truenas.provision_share")
 def test_truenas_wait_for_group_waits_when_retries_remain(mock_provision, mock_schedule, allocation):
     mock_provision.side_effect = GroupNotFoundError("Could not find group g in AD")
@@ -140,7 +179,7 @@ def test_truenas_wait_for_group_waits_when_retries_remain(mock_provision, mock_s
     assert message_of(allocation) == "Could not find group g in AD"
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.truenas.provision_share")
 def test_truenas_wait_for_group_fails_when_retries_exhausted(mock_provision, mock_schedule, allocation):
     mock_provision.side_effect = GroupNotFoundError("Could not find group g in AD")
@@ -245,7 +284,13 @@ def _succeeding_task(allocation_pk):
 
 @records_share_creation_state
 def _retrying_task(allocation_pk):
-    raise TaskRetryScheduled("group not in AD yet")
+    return rescheduled_result("group not in AD yet")
+
+
+@records_share_creation_state
+@reschedulable(retry_on=(GroupNotFoundError,))
+def _waiting_task(allocation_pk):
+    raise GroupNotFoundError("Could not find group g in AD")
 
 
 @records_share_creation_state
@@ -287,13 +332,13 @@ def test_django_q_marks_a_successful_task_successful(allocation):
 
 
 def test_django_q_marks_a_retrying_task_successful(allocation):
-    """A scheduled retry is a success to django-q2: the decorator swallows TaskRetryScheduled,
-    so nothing escapes the callable. The returned message is what distinguishes it from a completed
-    task in the Task list."""
+    """A scheduled retry is a success to django-q2: the body returned. The returned message is what
+    distinguishes it from a completed task in the Task list."""
     task = run_through_django_q(_retrying_task, allocation)
 
     assert task.success is True
-    assert task.result == {"message": "scheduled:group not in AD yet"}
+    assert task.result["message"] == "scheduled:group not in AD yet (runs again in 5 minutes, 4 retries left)"
+    assert type(task.result) is dict
     assert state_of(allocation) == ProvisionStatus.SCHEDULED
 
 
@@ -345,11 +390,11 @@ def test_the_status_message_wins_over_one_from_the_body(allocation):
 def test_the_message_carries_the_reason_for_waiting(allocation):
     @records_share_creation_state
     def task(allocation_pk):
-        raise TaskRetryScheduled("Could not find group with GID 'g' in AD")
+        return rescheduled_result("Could not find group with GID 'g' in AD")
 
     result = task(allocation.pk)
 
-    assert result["message"] == "scheduled:Could not find group with GID 'g' in AD"
     state, _, reason = result["message"].partition(":")
     assert state == ProvisionStatus.SCHEDULED
-    assert reason == message_of(allocation), "the message mirrors what was recorded on the allocation"
+    assert reason.startswith(message_of(allocation)), "the message leads with what was recorded on the allocation"
+    assert result["reason"] == message_of(allocation)

@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from coldfront.core.allocation.models import Allocation
+from coldfront_utils.tasks import reschedulable
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, ProvisionStatus
 from storage.directory_structure import PosixDeploymentRunner
@@ -14,14 +15,19 @@ from storage.utils import (
     build_task_result,
     get_allocation_group,
     lookup_ad_entries,
-    schedule_retry,
     validate_dirname,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=3):
+@reschedulable(retry_on=(ActiveDirectoryNotReadyError, ClusterDirectoryNotVisibleError), retries=5, wait=3)
+def create_folders(allocation_pk: int, structure_type: str):
+    """Create an allocation's folders on the cluster, waiting for AD and the cluster directory.
+
+    Not a state-recording task, so a run that has to wait returns @reschedulable's scheduled
+    result, which the task report shows: it runs again every 3 minutes, up to 5 times.
+    """
     # checked first, so a bad value fails at once rather than after waiting out AD's retries
     if structure_type not in ("hpc_project", "hpc_course"):
         logger.error(f"Unknown structure type {structure_type}. Cannot create folders.")
@@ -39,21 +45,12 @@ def create_folders(allocation_pk: int, structure_type: str, retries=5, wait=3):
         logger.error(f"No cluster path found for allocation {allocation_pk}")
         raise ValueError(f"No cluster path found for allocation {allocation_pk}")
     members = allocation.allocationuser_set.filter(status__name="Active").values_list("user__username", flat=True)
-    try:
-        # the folders are owned by the PI and the group, so both must be in AD first
-        lookup_ad_entries(owner, group)
-        if structure_type == "hpc_project":
-            create_project_folders(cluster_path, owner, group, list(members))
-        else:
-            create_course_folders(cluster_path, owner, group, list(members))
-    except (ActiveDirectoryNotReadyError, ClusterDirectoryNotVisibleError) as e:
-        # not a decorated task, so there's no state to record: schedule the retry and stop here
-        schedule_retry(
-            create_folders, e, retries=retries, wait=wait, allocation_pk=allocation_pk, structure_type=structure_type
-        )
-        return build_task_result(
-            ProvisionStatus.SCHEDULED, f"{e} (runs again in {wait} minutes, {retries - 1} retries left)"
-        )
+    # the folders are owned by the PI and the group, so both must be in AD first
+    lookup_ad_entries(owner, group)
+    if structure_type == "hpc_project":
+        create_project_folders(cluster_path, owner, group, list(members))
+    else:
+        create_course_folders(cluster_path, owner, group, list(members))
     return build_task_result(
         ProvisionStatus.SUCCESSFUL, f"created {structure_type} folders for allocation {allocation_pk}"
     )

@@ -3,6 +3,7 @@ import logging
 
 from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
+from coldfront_utils.tasks import reschedulable
 
 from .constants import (
     QUOTA_ATTRIBUTE_NAME,
@@ -13,13 +14,11 @@ from .constants import (
 from .utils import (
     ActiveDirectoryNotReadyError,
     BatchTally,
-    TaskRetryScheduled,
     get_client_config,
     lookup_ad_entries,
     records_quota_update_state,
     records_share_creation_state,
     require_path_attribute_type,
-    schedule_retry,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,6 +130,7 @@ def provision_share(native_path: str, quota_bytes: int, owner: str, group: str, 
 
 
 @records_share_creation_state
+@reschedulable(retry_on=(ActiveDirectoryNotReadyError,), retries=5, wait=5)
 def create_share_wait_for_group(
     native_path: str,
     quota_bytes: int,
@@ -138,26 +138,10 @@ def create_share_wait_for_group(
     group: str,
     client_config_id: str,
     allocation_pk: int,
-    retries=5,
-    wait=5,
 ):
-    try:
-        # the action, not the create_share task: nesting the tasks would nest their state handling
-        provision_share(native_path, quota_bytes, owner, group, client_config_id)
-    except ActiveDirectoryNotReadyError as e:
-        schedule_retry(
-            create_share_wait_for_group,
-            e,
-            retries=retries,
-            wait=wait,
-            native_path=native_path,
-            quota_bytes=quota_bytes,
-            owner=owner,
-            group=group,
-            client_config_id=client_config_id,
-            allocation_pk=allocation_pk,
-        )
-        raise TaskRetryScheduled(str(e)) from e
+    """Task entry point: create_share, but waiting for the group to reach AD (@reschedulable)."""
+    # the action, not the create_share task: nesting the tasks would nest their state handling
+    provision_share(native_path, quota_bytes, owner, group, client_config_id)
 
 
 def get_truenas_client(client_config_id):

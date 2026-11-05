@@ -150,7 +150,7 @@ beyond these four, and every one of them is reachable:
 | `started` | the decorator has entered the task body |
 | `successful` | the body returned |
 | `failed` | the body raised, with the exception as the message |
-| `scheduled` | the body scheduled its own retry, via `TaskRetryScheduled` |
+| `scheduled` | the body scheduled its own retry, returning a `Rescheduled` result (see below) |
 
 This is a property of the allocation, not of the queue. It says whether the allocation has its
 share or its quota, and it outlives the task that did the work — the Django Q task record is where
@@ -159,8 +159,8 @@ to look for the run itself.
 Tasks do not write either attribute themselves. The transitions above are made for them by one of
 the two decorators in `storage/utils.py` — `@records_share_creation_state` or
 `@records_quota_update_state`. So a task body only has to do the work and signal what happened: it
-cannot forget a transition or leave an allocation parked in `started`. Note that `scheduled` does
-not re-raise, since a scheduled retry is not a failure.
+cannot forget a transition or leave an allocation parked in `started`. A scheduled retry is not a
+failure, so django-q records the run as successful; its message says it's waiting.
 
 Both come from the same `_records_task_state()` factory and behave identically. They differ only in
 which pair of attributes they record into, which is why there are two of them rather than one: a
@@ -168,8 +168,9 @@ quota update must not overwrite the allocation's share creation state.
 
 Every task returns a dict carrying a `message` of `"<state>:<reason>"`, so the outcome is readable
 from the Django Q task list and not only from the allocation. They all build it with
-`build_task_result()` in `storage/utils.py`, so the format is the same everywhere: the decorated
-tasks, folder creation, and the batch tasks (see [Batch tasks](#batch-tasks)):
+`build_task_result()` from `coldfront_utils.tasks`, so the format is the same everywhere: the
+decorated tasks, folder creation, and the batch tasks (see [Batch tasks](#batch-tasks)), and other
+plugins' tasks that use it:
 
 ```python
 {"message": "successful:"}
@@ -252,15 +253,26 @@ else, so a retry repeats no other work. It raises `UserNotFoundError`, `UIDNotFo
 SMB-only groups, like RStore's, have no POSIX gid, so the SMB share task looks its group up with
 `require_gid=False`: the group must exist, but its gid may be missing.
 
-A task catches `ActiveDirectoryNotReadyError` (and `VastViewNotFoundError` on VAST, and
-`ClusterDirectoryNotVisibleError` where it creates folders; see below) and calls `schedule_retry()`,
-which schedules the task to run again in `wait` minutes with one retry fewer, passing its arguments
-by keyword, or re-raises the error once `retries` reaches 0. A decorated task then raises
-`TaskRetryScheduled`, so its state is `scheduled` until it runs again. Folder creation records no
-state, so it returns a `scheduled:` message instead, saying when it runs again and how many retries
-are left. A username that never reaches AD is therefore retried until its retries run out before
-the task fails: by default five times, five minutes apart, for the share tasks, and five times,
-three minutes apart, for folder creation.
+These tasks wait with `@reschedulable` from coldfront-utils (`coldfront_utils.tasks`; its README
+has the details). It retries on `ActiveDirectoryNotReadyError`, and on `VastViewNotFoundError` on
+VAST and `ClusterDirectoryNotVisibleError` where a task creates folders (see below). The task runs
+again `wait` minutes later with one retry fewer and the same arguments, passed by keyword; once its
+retries run out, it fails with the error. A username that never reaches AD is therefore retried
+until its retries run out before the task fails: by default five times, five minutes apart, for
+the share tasks, and five times, three minutes apart, for folder creation.
+
+A run that schedules its retry returns a `Rescheduled` result, whose message says what the task is
+waiting for, when it runs again and how many retries are left:
+`scheduled:Could not find group lab01 in AD (runs again in 5 minutes, 4 retries left)`. On a share
+task, `@records_share_creation_state` sees that result and records `scheduled`, with the reason as
+the message. Its retry calls the decorated task, so each run records its own state. Folder creation
+records no state, so the message on the task report is all it has.
+
+A task that waits this way:
+
+- stacks the decorators with `@reschedulable` inside the state decorator;
+- takes every argument by keyword, as literals that django-q can store, and has no `retries` or
+  `wait` parameters of its own: the decorator adds those to each call.
 
 ### Waiting for the cluster directory
 
@@ -283,8 +295,9 @@ The deploy functions take `require_existing=True`, for storage systems where pyi
 top directory itself.
 
 The directory is the last step of a VAST share task, so VAST is done by the time it is waited for.
-The retry is scheduled with `share_provisioned=True`, and that run skips `provision_share()` and
-`check_folder()`: waiting for the cluster directory doesn't repeat the VAST calls.
+The task raises `RetryLater(..., share_provisioned=True)` from the directory error, so its retry
+skips `provision_share()` and `check_folder()`: waiting for the cluster directory doesn't repeat
+the VAST calls. If the directory never appears, the task fails with `ClusterDirectoryNotVisibleError`.
 
 ## Batch tasks
 

@@ -104,7 +104,7 @@ def test_create_project_share_records_success(mock_provision, mock_check, mock_s
     assert state_of(allocation) == ProvisionStatus.SUCCESSFUL
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.vast.project.create_project_share_file_structure")
 @patch("storage.vast.project.check_folder")
 @patch("storage.vast.project.provision_share")
@@ -165,7 +165,7 @@ def test_create_course_share_records_success(
     assert state_of(allocation) == ProvisionStatus.SUCCESSFUL
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.vast.course.check_folder")
 @patch("storage.vast.course.provision_share")
 def test_create_course_share_waits_when_retries_remain(
@@ -209,7 +209,7 @@ def test_success_clears_a_previous_failure_message(mock_provision, allocation):
     assert message_of(allocation) == "", "the stale reason must be cleared, not left behind"
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.vast.project.create_project_share_file_structure")
 @patch("storage.vast.project.check_folder")
 @patch("storage.vast.project.provision_share")

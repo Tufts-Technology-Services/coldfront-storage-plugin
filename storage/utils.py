@@ -4,7 +4,7 @@ import logging
 import re
 from contextlib import suppress
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
 from coldfront.core.project.models import ProjectAttribute
@@ -17,9 +17,9 @@ from coldfront_utils.signals import (
     share_creation_failed,
     share_creation_successful,
 )
+from coldfront_utils.tasks import Rescheduled, build_task_result
 from coldfront_utils.util.ad_search import ADSearch
 from django.conf import settings
-from django_q.tasks import Schedule, schedule
 from ldap3.core.exceptions import (
     LDAPBindError,
     LDAPCommunicationError,
@@ -46,20 +46,17 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 
-class TaskRetryScheduled(Exception):
-    """Raised by a task body that has already scheduled its own retry.
-
-    Tells the state decorator to record ProvisionStatus.SCHEDULED rather than FAILED, and not to re-raise:
-    the task has not failed, it is just set to run again later.
-    """
-
-
 def _records_task_state(setter):
     """Build a decorator that records a task's state through the given setter.
 
     The wrapped task must take allocation_pk, positionally or by keyword. It is entered with the
-    state set to started; returning records successful, raising TaskRetryScheduled records scheduled,
-    and any other exception records failed with the exception as the message before re-raising.
+    state set to started; returning records successful, returning a Rescheduled result records
+    scheduled, and any exception records failed with the exception as the message before re-raising.
+
+    A task that waits for something puts @reschedulable (coldfront_utils.tasks) inside this
+    decorator. A run that schedules its retry returns Rescheduled, recorded here as scheduled with
+    its reason; once its retries are used up it raises, and is recorded as failed. Its retry calls
+    the decorated task by path, so each run records its own state.
 
     This means a task body does the work and nothing else: every state write lives here, so a task
     cannot forget a transition or leave an allocation parked in started. A decorated task must not
@@ -81,14 +78,17 @@ def _records_task_state(setter):
             setter(allocation, ProvisionStatus.STARTED, sender=wrapper)
             try:
                 result = func(*args, **kwargs)
-            except TaskRetryScheduled as e:
-                logger.info(f"{func.__qualname__} is scheduled to run again for allocation {allocation.pk}: {e}")
-                setter(allocation, ProvisionStatus.SCHEDULED, str(e), sender=wrapper)
-                return build_task_result(ProvisionStatus.SCHEDULED, str(e))
             except Exception as e:
                 logger.error(f"{func.__qualname__} failed for allocation {allocation.pk}: {e}")
                 setter(allocation, ProvisionStatus.FAILED, str(e), sender=wrapper, exception=e)
                 raise
+            if isinstance(result, Rescheduled):
+                reason = result["reason"]
+                logger.info(f"{func.__qualname__} is scheduled to run again for allocation {allocation.pk}: {reason}")
+                setter(allocation, ProvisionStatus.SCHEDULED, reason, sender=wrapper)
+                # a plain dict for django-q to store: a pickled Rescheduled would tie every stored
+                # result to where coldfront_utils keeps that class
+                return dict(result)
             payload = build_task_result(ProvisionStatus.SUCCESSFUL, "", result)
             setter(allocation, ProvisionStatus.SUCCESSFUL, sender=wrapper, result=payload)
             return payload
@@ -121,28 +121,16 @@ def _announce_outcome(successful, failed, sender, allocation, state, message, re
             )
 
 
-def build_task_result(state: ProvisionStatus, reason: str, returned=None) -> dict:
-    """Build what a task returns: a "message" of "<state>:<reason>", plus anything else to carry.
-
-    Every task in this plugin builds its result here, so the message has one format: django-q
-    stores the result, and the task report shows its "message". The decorated tasks pass in what
-    their body returned: a dict has its keys carried through, and any other value is kept under
-    "result". "message" is reserved for the status and always wins, so that a caller can rely on
-    it being present and well formed whatever the body did.
-    """
-    if isinstance(returned, dict):
-        result = dict(returned)
-    elif returned is not None:
-        result = {"result": returned}
-    else:
-        result = {}
-    result["message"] = f"{state}:{reason}"
-    return result
-
-
 def _allocation_from_call(func, args, kwargs):
-    """Find the allocation a task was called for, however it was given allocation_pk."""
-    bound = inspect.signature(func).bind(*args, **kwargs)
+    """Find the allocation a task was called for, however it was given allocation_pk.
+
+    Keywords the task body doesn't take are left out: @reschedulable adds `retries` and `wait` to a
+    retried call, and takes them off again before the body runs.
+    """
+    signature = inspect.signature(func)
+    if not any(p.kind is p.VAR_KEYWORD for p in signature.parameters.values()):
+        kwargs = {name: value for name, value in kwargs.items() if name in signature.parameters}
+    bound = signature.bind(*args, **kwargs)
     bound.apply_defaults()
     return Allocation.objects.get(id=bound.arguments["allocation_pk"])
 
@@ -415,7 +403,7 @@ def lookup_ad_entries(owner=None, group=None, *, require_gid=True):
     Raises UserNotFoundError or UIDNotFoundError for the user, GroupNotFoundError or GIDNotFoundError
     for the group, and ActiveDirectoryUnavailableError if AD can't be reached. All of them are
     ActiveDirectoryNotReadyError: AD can lag behind Grouper and account creation, or be down for a
-    while, so a task that catches that can retry with schedule_retry().
+    while, so a task can retry on it with @reschedulable (coldfront_utils.tasks).
 
     require_gid=False accepts a group with no gidNumber: SMB-only groups, like RStore's, have none.
     """
@@ -444,29 +432,6 @@ def lookup_ad_entries(owner=None, group=None, *, require_gid=True):
         # each lookup binds its own connection; don't leave it open in a long-lived worker
         with suppress(LDAPException):
             ad_search.conn.unbind()
-
-
-def schedule_retry(task, error, *, retries, wait, **task_kwargs) -> None:
-    """Schedule `task` to run again in `wait` minutes with one retry fewer, or re-raise `error`.
-
-    `task_kwargs` are the task's own arguments, passed by keyword so their order can't go wrong;
-    `retries` and `wait` are passed on for the next run. With no retries left, `error` is re-raised
-    so the task fails with it. A decorated task then raises TaskRetryScheduled, so its state is
-    recorded as scheduled rather than failed.
-    """
-    task_path = f"{task.__module__}.{task.__qualname__}"
-    if retries <= 0:
-        logger.error(f"{task_path} has no retries left: {error}")
-        raise error
-    logger.warning(f"{task_path} will run again in {wait} minutes ({retries - 1} retries left after that): {error}")
-    schedule(
-        task_path,
-        **task_kwargs,
-        retries=retries - 1,
-        wait=wait,
-        schedule_type=Schedule.ONCE,
-        next_run=datetime.now(timezone.utc) + timedelta(minutes=wait),
-    )
 
 
 class PathAttributeTypeMissingError(ValueError):

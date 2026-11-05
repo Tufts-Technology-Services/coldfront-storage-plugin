@@ -1,6 +1,5 @@
-"""lookup_ad_entries and schedule_retry, and the tasks that wait for AD with them."""
+"""lookup_ad_entries, and the tasks that wait for AD with it (@reschedulable)."""
 
-import inspect
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +20,6 @@ from storage.utils import (
     UserNotFoundError,
     lookup_ad_entries,
     records_share_creation_state,
-    schedule_retry,
 )
 from storage.vast import course, project, vast
 
@@ -70,42 +68,45 @@ def test_each_missing_piece_has_its_own_error_and_message(ad, user, group, error
     assert isinstance(raised.value, ActiveDirectoryNotFoundError), "retry wrappers catch the base class"
 
 
-# --- schedule_retry --------------------------------------------------------------------------
+# --- the retry ------------------------------------------------------------------------------
 
 
-@patch("storage.utils.schedule")
-def test_schedules_the_task_by_its_own_path_with_arguments_it_accepts(mock_schedule):
-    error = GroupNotFoundError("not yet")
-    task_kwargs = dict(
-        native_path="/projects/p", quota_bytes=10, owner="o", group="g", client_config_id="hpc", allocation_pk=1
-    )
+@patch("coldfront_utils.tasks.reschedulable.schedule")
+@patch("storage.vast.project.check_folder")
+@patch("storage.vast.project.provision_share")
+def test_the_retry_calls_the_decorated_task_with_its_own_arguments(
+    mock_provision, mock_check, mock_schedule, ad, allocation
+):
+    """By its own path, so the retry records state too, and by keyword, so the order can't go wrong.
 
-    schedule_retry(project.create_project_share, error, retries=3, wait=7, **task_kwargs)
+    Passing them as kwargs={...} handed the task one argument named "kwargs", which is how TrueNAS's
+    retries used to break.
+    """
+    ad.get_ad_group.return_value = None
+
+    # positionally, as storage.tasks.create_share queues it
+    project.create_project_share("/projects/p", 10, "o", "g", "hpc", allocation.pk)
 
     path = mock_schedule.call_args.args[0]
     scheduled = {k: v for k, v in mock_schedule.call_args.kwargs.items() if k not in ("schedule_type", "next_run")}
     assert import_string(path) is project.create_project_share
-    assert scheduled == {**task_kwargs, "retries": 2, "wait": 7}
-    # the scheduled run must be callable with what was scheduled: passing them as kwargs={...}
-    # handed the task one argument named "kwargs", which is how TrueNAS's retries used to break
-    inspect.signature(project.create_project_share).bind(**scheduled)
-
-
-@patch("storage.utils.schedule")
-def test_with_no_retries_left_the_error_is_raised(mock_schedule):
-    error = GIDNotFoundError("never")
-
-    with pytest.raises(GIDNotFoundError) as raised:
-        schedule_retry(project.create_project_share, error, retries=0, wait=5)
-
-    assert raised.value is error
-    mock_schedule.assert_not_called()
+    assert scheduled == {
+        "native_path": "/projects/p",
+        "quota_bytes": 10,
+        "owner": "o",
+        "group": "g",
+        "client_config_id": "hpc",
+        "allocation_pk": allocation.pk,
+        "retries": 4,
+        "wait": 5,
+        "q_options": {},
+    }
 
 
 # --- the tasks -------------------------------------------------------------------------------
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.vast.vast.get_vast_params")
 @patch("storage.vast.vast.get_vast_client")
 def test_an_smb_share_waits_for_its_group(mock_client, mock_params, mock_schedule, ad, allocation):
@@ -118,7 +119,7 @@ def test_an_smb_share_waits_for_its_group(mock_client, mock_params, mock_schedul
     mock_client.return_value.add_view.assert_not_called()
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.vast.vast.get_vast_params")
 @patch("storage.vast.vast.get_vast_client")
 def test_an_smb_share_fails_once_its_retries_run_out(mock_client, mock_params, mock_schedule, ad, allocation):
@@ -132,7 +133,7 @@ def test_an_smb_share_fails_once_its_retries_run_out(mock_client, mock_params, m
     mock_schedule.assert_not_called()
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.vast.project.check_folder")
 @patch("storage.vast.project.provision_share")
 def test_a_missing_user_is_waited_for_too(mock_provision, mock_check, mock_schedule, ad, allocation):
@@ -145,7 +146,7 @@ def test_a_missing_user_is_waited_for_too(mock_provision, mock_check, mock_sched
     mock_schedule.assert_called_once()
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.directory_structure.tasks.create_project_folders")
 @patch("storage.directory_structure.tasks.get_allocation_group", return_value="g")
 def test_folder_creation_waits_for_the_group(
@@ -156,7 +157,7 @@ def test_folder_creation_waits_for_the_group(
 
     result = directory_tasks.create_folders(allocation.pk, "hpc_project")
 
-    assert result == {"message": "scheduled:Could not find group g in AD (runs again in 3 minutes, 4 retries left)"}
+    assert result["message"] == "scheduled:Could not find group g in AD (runs again in 3 minutes, 4 retries left)"
     mock_folders.assert_not_called()
     assert import_string(mock_schedule.call_args.args[0]) is directory_tasks.create_folders
     assert mock_schedule.call_args.kwargs["allocation_pk"] == allocation.pk
@@ -164,7 +165,7 @@ def test_folder_creation_waits_for_the_group(
     assert mock_schedule.call_args.kwargs["retries"] == 4
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.directory_structure.tasks.create_project_folders")
 @patch("storage.directory_structure.tasks.get_allocation_group", return_value="g")
 def test_folder_creation_reports_success_on_the_task_report(
@@ -254,7 +255,7 @@ def test_waiting_for_ad_makes_no_vast_calls(ad, allocation, task):
     ad.get_ad_group.return_value = None
     module = task.__module__
     with patch(f"{module}.provision_share") as mock_provision, patch(f"{module}.check_folder") as mock_check:
-        with patch("storage.utils.schedule"):
+        with patch("coldfront_utils.tasks.reschedulable.schedule"):
             task("/projects/p", 10, "o", "g", "hpc", allocation.pk)
 
     mock_provision.assert_not_called()
@@ -262,7 +263,7 @@ def test_waiting_for_ad_makes_no_vast_calls(ad, allocation, task):
     assert state_of(allocation) == ProvisionStatus.SCHEDULED
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 @patch("storage.directory_structure.tasks.create_project_folders")
 @patch("storage.directory_structure.tasks.get_allocation_group", return_value="g")
 def test_folder_creation_waits_for_the_owner_too(
@@ -277,7 +278,7 @@ def test_folder_creation_waits_for_the_owner_too(
     mock_schedule.assert_called_once()
 
 
-@patch("storage.utils.schedule")
+@patch("coldfront_utils.tasks.reschedulable.schedule")
 def test_an_unknown_structure_type_fails_before_waiting_for_ad(mock_schedule, ad):
     ad.get_ad_group.return_value = None
 

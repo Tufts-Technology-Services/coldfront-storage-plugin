@@ -1,15 +1,11 @@
 import logging
 from pathlib import Path
 
+from coldfront_utils.tasks import RetryLater, reschedulable
+
 from storage.directory_structure.tasks import create_project_folders
 from storage.directory_structure.utils import ClusterDirectoryNotVisibleError
-from storage.utils import (
-    ActiveDirectoryNotReadyError,
-    TaskRetryScheduled,
-    lookup_ad_entries,
-    records_share_creation_state,
-    schedule_retry,
-)
+from storage.utils import ActiveDirectoryNotReadyError, lookup_ad_entries, records_share_creation_state
 from storage.vast.errors import VastViewNotFoundError
 
 from .vast import check_folder, native_path_to_cluster_path, provision_share
@@ -18,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 @records_share_creation_state
+@reschedulable(retry_on=(ActiveDirectoryNotReadyError, VastViewNotFoundError), retries=5, wait=5)
 def create_project_share(
     native_path: str,
     quota_bytes: int,
@@ -25,8 +22,6 @@ def create_project_share(
     group: str,
     client_config_id: str,
     allocation_pk: int,
-    retries=5,
-    wait=5,
     share_provisioned=False,
 ):
     """
@@ -40,42 +35,29 @@ def create_project_share(
         group (str): The group of the project, used for cluster folder group
         client_config_id (str): The client config id to use for connecting to VAST
         allocation_pk (int): The allocation primary key, used for logging and tracking purposes
-        retries (int, optional): The number of retries while AD, the VAST view or the cluster directory
-            isn't ready. Defaults to 5.
-        wait (int, optional): The wait time between retries in minutes. Defaults to 5.
         share_provisioned (bool, optional): Whether an earlier run already finished on VAST, so this one
             only creates the folders. Set by the retry that waits for the cluster directory. Defaults to False.
+
+    Runs again every 5 minutes, up to 5 times, while AD, the VAST view or the cluster directory isn't
+    ready (@reschedulable); a call can pass retries= and wait= to change that.
     """
+    # before any VAST calls, so waiting for AD doesn't repeat them on every retry
+    lookup_ad_entries(owner, group)
+    # skipped once VAST is done, so waiting for the cluster directory doesn't repeat them either
+    if not share_provisioned:
+        provision_share(
+            native_path=native_path.lower(),
+            quota_bytes=quota_bytes,
+            client_config_id=client_config_id,
+        )
+        check_folder(native_path, client_config_id=client_config_id)
     try:
-        # before any VAST calls, so waiting for AD doesn't repeat them on every retry
-        lookup_ad_entries(owner, group)
-        # skipped once VAST is done, so waiting for the cluster directory doesn't repeat them either
-        if not share_provisioned:
-            provision_share(
-                native_path=native_path.lower(),
-                quota_bytes=quota_bytes,
-                client_config_id=client_config_id,
-            )
-            check_folder(native_path, client_config_id=client_config_id)
         create_project_share_file_structure(
             native_path=native_path, owner=owner, group=group, client_config_id=client_config_id
         )
-    except (ActiveDirectoryNotReadyError, VastViewNotFoundError, ClusterDirectoryNotVisibleError) as e:
-        schedule_retry(
-            create_project_share,
-            e,
-            retries=retries,
-            wait=wait,
-            native_path=native_path,
-            quota_bytes=quota_bytes,
-            owner=owner,
-            group=group,
-            client_config_id=client_config_id,
-            allocation_pk=allocation_pk,
-            # the cluster directory is the last step: VAST is done by the time it's waited for
-            share_provisioned=share_provisioned or isinstance(e, ClusterDirectoryNotVisibleError),
-        )
-        raise TaskRetryScheduled(str(e)) from e
+    except ClusterDirectoryNotVisibleError as e:
+        # the last step: VAST is done by now, so the retry only has to create the folders
+        raise RetryLater(str(e), share_provisioned=True) from e
 
 
 def create_project_share_file_structure(native_path: str, owner: str, group: str, client_config_id: str):
