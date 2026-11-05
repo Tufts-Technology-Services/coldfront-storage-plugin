@@ -6,7 +6,7 @@ from coldfront.core.resource.models import Resource
 from coldfront_utils import ttl_cache, update_allocation_attribute_value
 
 from storage.constants import USAGE_MATCH_ATTRIBUTE_NAME
-from storage.utils import BatchTally, get_client_config, update_allocation_usage
+from storage.utils import BatchTally, get_client_config, require_path_attribute_type, update_allocation_usage
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ def get_storage_usage_batch(resource_id=None, client_config_id=None):
     resource = Resource.objects.get(id=resource_id)
     client_config = get_client_config(client_config_id)
     path_attr = client_config['native_path_attribute_name']
+    require_path_attribute_type(path_attr)
 
     resource_allocations = resource.allocation_set.distinct()
     sf_attrs = list(AllocationAttribute.objects.filter(allocation__in=resource_allocations,

@@ -20,6 +20,7 @@ from storage.utils import (
     lookup_ad_entries,
     records_quota_update_state,
     records_share_creation_state,
+    require_path_attribute_type,
     schedule_retry,
 )
 from storage.vast.errors import VastQuotaNotFoundError, VastViewNotFoundError
@@ -31,6 +32,7 @@ def get_quotas_batch(resource_id, client_config_id):
     # get allocation info from vast api and update allocation attributes in coldfront
     resource = Resource.objects.get(id=resource_id)
     client_config = get_client_config(client_config_id)
+    require_path_attribute_type(client_config["native_path_attribute_name"])
     allocations = resource.allocation_set.distinct()
     # one VAST call for the whole run, so VAST being down fails it once with VAST's own error,
     # rather than every allocation waiting out the client's timeout and retries in turn

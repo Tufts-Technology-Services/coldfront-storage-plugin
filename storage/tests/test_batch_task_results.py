@@ -10,7 +10,7 @@ import pytest
 
 from storage import starfish, tasks, truenas
 from storage.models import StorageHandler
-from storage.utils import BatchMostlyFailedError, BatchTally
+from storage.utils import BatchMostlyFailedError, BatchTally, PathAttributeTypeMissingError
 from storage.vast import vast
 
 VAST_PATH = "vast_path"
@@ -210,6 +210,51 @@ def test_starfish_usage_fails_when_starfish_is_down(
 
     with pytest.raises(BatchMostlyFailedError, match="2 of 2"):
         starfish.get_storage_usage_batch(storage_resource.pk, "sf")
+
+
+# --- a misconfigured path attribute ------------------------------------------------------------
+
+
+def test_vast_quotas_fail_when_the_path_attribute_type_is_missing(vast_quota_mocks, storage_resource, make_allocation):
+    """Every allocation would be skipped, and a run that refreshed nothing would report success."""
+    make_allocation(storage_resource)
+
+    with pytest.raises(PathAttributeTypeMissingError, match=f"'{VAST_PATH}' does not exist"):
+        vast.get_quotas_batch(storage_resource.pk, "hpc")
+
+    vast_quota_mocks.assert_not_called()
+
+
+@patch("storage.truenas.get_truenas_client")
+def test_truenas_quotas_fail_when_the_path_attribute_type_is_missing(mock_client, storage_resource, make_allocation):
+    make_allocation(storage_resource)
+
+    with pytest.raises(PathAttributeTypeMissingError, match="'truenas_path' does not exist"):
+        truenas.get_quotas_batch(storage_resource.pk, "truenas")
+
+    mock_client.assert_not_called()
+
+
+@patch("storage.starfish.get_starfish_usage_data_by_volume")
+@patch("storage.starfish.get_client_config", return_value={"native_path_attribute_name": SF_PATH})
+def test_starfish_usage_fails_when_the_path_attribute_type_is_missing(
+    mock_config, mock_volume_data, storage_resource, make_allocation
+):
+    make_allocation(storage_resource)
+
+    with pytest.raises(PathAttributeTypeMissingError, match=f"'{SF_PATH}' does not exist"):
+        starfish.get_storage_usage_batch(storage_resource.pk, "sf")
+
+    mock_volume_data.assert_not_called()
+
+
+def test_allocations_without_a_path_are_still_only_skipped(vast_quota_mocks, storage_resource, make_allocation):
+    """Pending, denied and expired allocations often have no path; that isn't a misconfiguration."""
+    make_allocation(storage_resource, attributes={VAST_PATH: "/projects/good"})
+    make_allocation(storage_resource)
+    make_allocation(storage_resource)
+
+    assert vast.get_quotas_batch(storage_resource.pk, "hpc") == {"message": "updated 1, skipped 2"}
 
 
 # --- the batches that queue one task per resource ----------------------------------------------

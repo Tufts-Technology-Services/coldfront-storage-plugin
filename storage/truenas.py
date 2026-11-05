@@ -18,6 +18,7 @@ from .utils import (
     lookup_ad_entries,
     records_quota_update_state,
     records_share_creation_state,
+    require_path_attribute_type,
     schedule_retry,
 )
 
@@ -39,6 +40,7 @@ def set_quota(native_path: str, quota_bytes: int, client_config_id: str, allocat
 
 
 def get_quotas_batch(resource_id, client_config_id):
+    require_path_attribute_type("truenas_path")
     tc = get_truenas_client(client_config_id)
     all_quotas = tc.get_all_datasets()
 

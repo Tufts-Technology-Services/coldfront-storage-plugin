@@ -467,6 +467,24 @@ def schedule_retry(task, error, *, retries, wait, **task_kwargs) -> None:
     )
 
 
+class PathAttributeTypeMissingError(ValueError):
+    """The attribute type a batch task reads each allocation's storage path from doesn't exist."""
+
+
+def require_path_attribute_type(attribute_name: str) -> None:
+    """Fail a batch task at once if no allocation can have a path under `attribute_name`.
+
+    Without this, a misconfigured or renamed path attribute skips every allocation, and a run that
+    refreshed nothing reports success: skipped allocations count neither for nor against a run,
+    because pending, denied and expired allocations often have no path.
+    """
+    if not AllocationAttributeType.objects.filter(name=attribute_name).exists():
+        raise PathAttributeTypeMissingError(
+            f"Allocation attribute type '{attribute_name}' does not exist, so no allocation has a storage "
+            "path under it: it was renamed or deleted, or the storage client config names the wrong one"
+        )
+
+
 class BatchMostlyFailedError(Exception):
     """A batch task went wrong for too many of its allocations to count as having worked."""
 
