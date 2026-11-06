@@ -3,9 +3,10 @@ import logging
 from pathlib import Path
 
 import requests
-from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, ttl_cache, update_allocation_attribute_value, validate_posix_path
 from coldfront_utils.tasks import reschedulable
+
+from coldfront.core.resource.models import Resource
 
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,

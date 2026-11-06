@@ -1,9 +1,10 @@
 import logging
 from datetime import datetime
 
+from coldfront_utils import ttl_cache, update_allocation_attribute_value
+
 from coldfront.core.allocation.models import AllocationAttribute
 from coldfront.core.resource.models import Resource
-from coldfront_utils import ttl_cache, update_allocation_attribute_value
 
 from storage.constants import USAGE_MATCH_ATTRIBUTE_NAME
 from storage.utils import BatchTally, get_client_config, require_path_attribute_type, update_allocation_usage

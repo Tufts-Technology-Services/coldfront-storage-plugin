@@ -5,8 +5,9 @@ ActingUserMiddleware sets for each web request, and which a running task carries
 that queued it.
 """
 
-from coldfront.core.allocation.signals import allocation_change_created, allocation_new
 from coldfront_utils.task_context import acting_as
+
+from coldfront.core.allocation.signals import allocation_change_created, allocation_new
 
 # the classes the receivers are connected to: StorageConfig.ready() then swaps storage's own
 # AllocationCreateView into coldfront.core.allocation.views, so importing it from there would send

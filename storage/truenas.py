@@ -1,9 +1,10 @@
 import datetime
 import logging
 
-from coldfront.core.resource.models import Resource
 from coldfront_utils import bytes_to_units, update_allocation_attribute_value, validate_posix_path
 from coldfront_utils.tasks import reschedulable
+
+from coldfront.core.resource.models import Resource
 
 from .constants import (
     QUOTA_ATTRIBUTE_NAME,

@@ -6,9 +6,6 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
-from coldfront.core.project.models import ProjectAttribute
-from coldfront.core.resource.models import ResourceAttribute
 from coldfront_utils import bytes_to_units, update_allocation_attribute_usage, update_allocation_attribute_value
 from coldfront_utils.attribute.attribute import create_allocation_attribute_type
 from coldfront_utils.signals import (
@@ -28,6 +25,10 @@ from ldap3.core.exceptions import (
     LDAPServerPoolExhaustedError,
     LDAPStartTLSError,
 )
+
+from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AttributeType
+from coldfront.core.project.models import ProjectAttribute
+from coldfront.core.resource.models import ResourceAttribute
 
 from .constants import (
     GROUP_ATTRIBUTE_NAME,

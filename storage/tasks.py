@@ -1,8 +1,9 @@
 import logging
 
-from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType, AttributeType
 from coldfront_utils import units_to_bytes, update_allocation_attribute_value
 from django_q.tasks import async_task
+
+from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType, AttributeType
 
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,

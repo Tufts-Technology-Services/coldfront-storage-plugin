@@ -1,7 +1,8 @@
-from coldfront.core.allocation.models import AllocationAttribute, AllocationAttributeType, AllocationStatusChoice
-from coldfront.core.resource.models import Resource
 from django import forms
 from django.db.models.functions import Lower
+
+from coldfront.core.allocation.models import AllocationAttribute, AllocationAttributeType, AllocationStatusChoice
+from coldfront.core.resource.models import Resource
 
 from .constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 

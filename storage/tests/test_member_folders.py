@@ -10,10 +10,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from coldfront.core.allocation.models import AllocationUserStatusChoice
-from coldfront.core.allocation.signals import allocation_activate_user
 from django.contrib.auth.models import User
 from django.utils.module_loading import import_string
+
+from coldfront.core.allocation.models import AllocationUserStatusChoice
+from coldfront.core.allocation.signals import allocation_activate_user
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, GROUP_ATTRIBUTE_NAME
 from storage.directory_structure import tasks as directory_tasks

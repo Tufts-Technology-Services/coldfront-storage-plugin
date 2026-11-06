@@ -1,11 +1,12 @@
 from datetime import date
 
-from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db.models import Prefetch, Q, QuerySet
 from django.shortcuts import get_object_or_404
 from django.views.generic import ListView
+
+from coldfront.core.allocation.models import Allocation, AllocationAttribute
 
 from storage.forms import StorageAuditSearchForm
 

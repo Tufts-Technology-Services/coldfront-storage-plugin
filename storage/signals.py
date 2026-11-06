@@ -1,5 +1,8 @@
 import logging
 
+from coldfront_utils.task_context import get_acting_username
+from django.dispatch import receiver
+
 from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationUser
 from coldfront.core.allocation.signals import (
     allocation_activate,
@@ -15,8 +18,6 @@ from coldfront.core.allocation.views import (
     AllocationCreateView,
     AllocationDetailView,
 )
-from coldfront_utils.task_context import get_acting_username
-from django.dispatch import receiver
 
 from .constants import QUOTA_ATTRIBUTE_NAME
 from .tasks import add_attributes_to_new_storage_allocation, create_member_directory, create_share, set_storage_quota

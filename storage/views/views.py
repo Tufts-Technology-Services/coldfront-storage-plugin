@@ -1,13 +1,14 @@
 import logging
 
-from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AllocationPermission
-from coldfront.core.allocation.views import AllocationAttributeEditView as ColdfrontAllocationAttributeEditView
-from coldfront.core.allocation.views import AllocationCreateView as ColdfrontAllocationCreateView
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views.generic import FormView
+
+from coldfront.core.allocation.models import Allocation, AllocationAttributeType, AllocationPermission
+from coldfront.core.allocation.views import AllocationAttributeEditView as ColdfrontAllocationAttributeEditView
+from coldfront.core.allocation.views import AllocationCreateView as ColdfrontAllocationCreateView
 
 from ..constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
 from ..forms import AllocationAttributeEditForm, StorageAllocationRequestDetailsForm

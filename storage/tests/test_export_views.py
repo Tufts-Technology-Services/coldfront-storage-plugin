@@ -2,11 +2,12 @@ import csv
 import io
 
 import pytest
-from coldfront.core.resource.models import Resource, ResourceType
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
 from django.test import RequestFactory
 from django.urls import reverse
+
+from coldfront.core.resource.models import Resource, ResourceType
 
 from storage.views import StorageAllocationExportView
 

@@ -3,8 +3,9 @@
 import importlib
 
 import pytest
-from coldfront.core.allocation.models import AllocationAttributeType, AttributeType
 from django.apps import apps as global_apps
+
+from coldfront.core.allocation.models import AllocationAttributeType, AttributeType
 
 migration = importlib.import_module("storage.migrations.0003_create_task_attribute_types")
 
