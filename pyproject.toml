@@ -77,10 +77,15 @@ addopts = "--strict-markers"
 [tool.ruff]
 line-length = 120
 indent-width = 4
-target-version = "py311"
+target-version = "py311"  # the oldest Python in requires-python
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I", "S308"]
+select = ["E4", "E7", "E9", "F", "I", "S308", "S113"]
+
+[tool.ruff.lint.isort]
+# coldfront's imports get a section of their own, between third-party and this package's
+sections = { "coldfront-main" = ["coldfront"] }
+section-order = ["future", "standard-library", "third-party", "coldfront-main", "first-party", "local-folder"]
 
 [tool.ruff.format]
 indent-style = "space"
