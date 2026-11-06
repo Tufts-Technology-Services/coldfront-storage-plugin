@@ -1,3 +1,5 @@
 # Formatting-only commits, skipped by `git blame`. Add the full hash of any future bulk reformat here.
 # Apply ruff check --fix and ruff format
 574363e88288c5c1fb69dfd4deb76c7abd3766d0
+# Reformat with the shared ruff setup
+d45b9d6df3217580771a8a36b8665a54758a4c47

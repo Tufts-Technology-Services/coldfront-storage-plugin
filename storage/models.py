@@ -1,5 +1,6 @@
-from coldfront.core.resource.models import Resource
 from django.db import models
+
+from coldfront.core.resource.models import Resource
 
 
 class StorageHandler(models.Model):

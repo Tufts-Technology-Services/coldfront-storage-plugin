@@ -1,13 +1,14 @@
 import csv
 from collections import defaultdict
 
-from coldfront.core.allocation.models import Allocation, AllocationAttribute
-from coldfront.core.project.models import ProjectAttribute
-from coldfront.core.utils.common import Echo
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.views.generic import View
+
+from coldfront.core.allocation.models import Allocation, AllocationAttribute
+from coldfront.core.project.models import ProjectAttribute
+from coldfront.core.utils.common import Echo
 
 from storage.constants import STORAGE_RESOURCE_TYPE_NAME
 

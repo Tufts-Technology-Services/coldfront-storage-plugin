@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import User
+
 from coldfront.core.allocation.models import (
     Allocation,
     AllocationAttributeType,
@@ -16,7 +18,6 @@ from coldfront.core.project.models import (
     ProjectStatusChoice,
 )
 from coldfront.core.resource.models import Resource, ResourceType
-from django.contrib.auth.models import User
 
 
 @pytest.fixture(autouse=True)

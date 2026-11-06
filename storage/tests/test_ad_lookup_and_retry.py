@@ -3,9 +3,10 @@
 from unittest.mock import patch
 
 import pytest
-from coldfront.core.allocation.models import AllocationAttributeType
 from django.utils.module_loading import import_string
 from ldap3.core.exceptions import LDAPInvalidFilterError, LDAPSocketOpenError
+
+from coldfront.core.allocation.models import AllocationAttributeType
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, SHARE_CREATION_MESSAGE_ATTRIBUTE_NAME, ProvisionStatus
 from storage.directory_structure import tasks as directory_tasks

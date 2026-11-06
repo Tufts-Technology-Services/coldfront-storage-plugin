@@ -1,9 +1,10 @@
 import logging
 from pathlib import Path
 
-from coldfront.core.allocation.models import Allocation, AllocationAttribute
 from coldfront_utils.tasks import reschedulable
 from django_q.models import Task
+
+from coldfront.core.allocation.models import Allocation, AllocationAttribute
 
 from storage.constants import CLUSTER_PATH_ATTRIBUTE_NAME, ProvisionStatus
 from storage.directory_structure import PosixDeploymentRunner

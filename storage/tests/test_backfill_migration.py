@@ -8,11 +8,12 @@ configured' and 'already created'.
 import importlib
 
 import pytest
+from django.apps import apps as global_apps
+
 from coldfront.core.allocation.models import (
     AllocationAttribute,
     AllocationAttributeType,
 )
-from django.apps import apps as global_apps
 
 from storage.constants import (
     QUOTA_UPDATE_MESSAGE_ATTRIBUTE_NAME,
