@@ -19,7 +19,7 @@ class StorageConfig(AppConfig):
         # tests whether the client has the appropriate configuration and any dependencies can be imported
         import storage.signals
 
-        if not apps.is_installed("allocation_blueprints") and ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION:
+        if not apps.is_installed("allocation_blueprint") and ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION:
             storage.signals.enable_add_attributes()
         # Override allocation create view so users specify quota when requesting storage
         import coldfront.core.allocation.views as allocation_views
