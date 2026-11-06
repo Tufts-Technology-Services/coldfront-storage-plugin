@@ -22,11 +22,17 @@ The Storage Plugin provides an interface for managing storage within the ColdFro
 2. Add the following to your `local_settings.py` file:
 ```python
 from coldfront.config.env import ENV
-from coldfront.config.base import INSTALLED_APPS
+from coldfront.config.base import INSTALLED_APPS, MIDDLEWARE
 
 if ENV.bool("PLUGIN_USER_MANAGEMENT", default=False):
-    INSTALLED_APPS += ["storage"]
+    INSTALLED_APPS += ["storage", "coldfront_utils.task_context"]
+    # after AuthenticationMiddleware, which ColdFront's base settings already include
+    MIDDLEWARE += ["coldfront_utils.task_context.middleware.ActingUserMiddleware"]
 ```
+`coldfront_utils.task_context` tells the plugin who is acting: it records them as the requester or
+approver of a storage allocation or quota change, and carries them into the storage tasks, so the
+history rows those tasks write name them. Without it, the requester and approver are recorded as
+`unknown`. See the coldfront-utils README.
 
 3. Update `local_urls.py` with the following:
 ```python

@@ -15,10 +15,10 @@ from coldfront.core.allocation.views import (
     AllocationCreateView,
     AllocationDetailView,
 )
+from coldfront_utils.task_context import get_acting_username
 from django.dispatch import receiver
 
 from .constants import QUOTA_ATTRIBUTE_NAME
-from .context_storage import get_request_username
 from .tasks import add_attributes_to_new_storage_allocation, create_member_directory, create_share, set_storage_quota
 from .utils import stamp_allocation_approver, stamp_allocation_requester, stamp_quota_approver, stamp_quota_requester
 
@@ -34,7 +34,7 @@ def activate_storage_allocation(sender, **kwargs):
         if allocation.status.name not in ["Active"]:
             logger.debug(f"Allocation {allocation_pk} is not active. Skipping storage provisioning.")
             return
-        stamp_allocation_approver(allocation, get_request_username() or "unknown")
+        stamp_allocation_approver(allocation, get_acting_username() or "unknown")
         create_share(allocation_pk)
 
 
@@ -48,7 +48,7 @@ def allocation_quota_changed_handler(sender, **kwargs):
         attribute_name = AllocationAttribute.objects.get(id=attribute_pk).allocation_attribute_type.name
         if attribute_name == QUOTA_ATTRIBUTE_NAME:
             # quota change
-            stamp_quota_approver(allocation, get_request_username() or "unknown")
+            stamp_quota_approver(allocation, get_acting_username() or "unknown")
             set_storage_quota(allocation_pk, allocation_attribute_change_id=attribute_pk)
 
 
@@ -57,7 +57,7 @@ def add_allocation_requester_info(sender, **kwargs):
     allocation_pk = kwargs.get("allocation_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
     if allocation.resources.first().resource_type.name == "Storage":
-        requester = get_request_username() or "unknown"
+        requester = get_acting_username() or "unknown"
         stamp_allocation_requester(allocation, requester)
 
 
@@ -66,7 +66,7 @@ def add_change_requester_info(sender, **kwargs):
     allocation_pk = kwargs.get("allocation_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
     if allocation.resources.first().resource_type.name == "Storage":
-        requester = get_request_username() or "unknown"
+        requester = get_acting_username() or "unknown"
         stamp_quota_requester(allocation, requester)
 
 
