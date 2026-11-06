@@ -21,3 +21,6 @@ DATABASES = {
 
 # the tests never send mail; fail loudly rather than reaching a relay
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+
+# a deliberately weak hasher: creating users is much faster, and nothing here checks its strength
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
