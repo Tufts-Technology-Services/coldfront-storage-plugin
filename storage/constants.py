@@ -49,6 +49,9 @@ SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME = ENV.str(
 )  # name of the allocation attribute where the task id of the share creation task will be stored
 # name of the ResourceType whose resources this plugin manages
 STORAGE_RESOURCE_TYPE_NAME = "Storage"
+# name of the Yes/No resource attribute that says whether a request for the resource asks for a quota
+# (the storage_quota section of the allocation request form); asking is the default, No opts out
+QUOTA_ON_REQUEST_ATTRIBUTE_NAME = ENV.str("QUOTA_ON_REQUEST_ATTRIBUTE_NAME", default="quota_on_request")
 SHARE_CREATION_STATE_ATTRIBUTE_NAME = ENV.str(
     "SHARE_CREATION_STATE_ATTRIBUTE_NAME", default="share_creation_state"
 )  # name of the allocation attribute where the state of the share creation will be stored (one of ProvisionStatus)

@@ -25,7 +25,7 @@ from coldfront.config.env import ENV
 from coldfront.config.base import INSTALLED_APPS, MIDDLEWARE
 
 if ENV.bool("PLUGIN_USER_MANAGEMENT", default=False):
-    INSTALLED_APPS += ["storage", "coldfront_utils.task_context"]
+    INSTALLED_APPS += ["storage", "coldfront_utils.task_context", "coldfront_utils.allocation_request"]
     # after AuthenticationMiddleware, which ColdFront's base settings already include
     MIDDLEWARE += ["coldfront_utils.task_context.middleware.ActingUserMiddleware"]
 ```
@@ -33,6 +33,13 @@ if ENV.bool("PLUGIN_USER_MANAGEMENT", default=False):
 approver of a storage allocation or quota change, and carries them into the storage tasks, so the
 history rows those tasks write name them. Without it, the requester and approver are recorded as
 `unknown`. See the coldfront-utils README.
+
+`coldfront_utils.allocation_request` is where a Storage request asks for its quota: see "The quota on
+the request form", below. The plugin refuses to start without it (check `storage.E001`), and so does
+`migrate`: when upgrading from a version without the request section, add the app to
+`INSTALLED_APPS` in the same deploy as the new plugin, or before it. Other plugins that replace
+ColdFront's `AllocationCreateView` must have moved to request sections by then too, or the app
+refuses to start.
 
 3. Update `local_urls.py` with the following:
 ```python
@@ -50,6 +57,7 @@ if ENV.bool("PLUGIN_USER_MANAGEMENT", default=False) and "storage" in INSTALLED_
 PLUGIN_USER_MANAGEMENT=False  # set to True to enable the plugin
 STORAGE_PLUGIN_STORAGE_UNITS=TB  # units for storage attributes (e.g., TB, GB)
 QUOTA_ATTRIBUTE_NAME="Storage Quota (TB)"  # name of the allocation attribute that holds the storage quota value
+QUOTA_ON_REQUEST_ATTRIBUTE_NAME=quota_on_request  # name of the Yes/No resource attribute that says whether a request for the resource asks for a quota
 QUOTA_IN_BYTES_ATTRIBUTE_NAME=reported_quota_bytes  # name of the allocation attribute that holds the quota the storage system reports, in bytes
 QUOTA_REPORT_DATE_ATTRIBUTE_NAME=quota_report_date  # name of the allocation attribute that holds the date when the quota was last updated
 USAGE_IN_BYTES_ATTRIBUTE_NAME=reported_usage_bytes  # name of the allocation attribute that holds the current storage usage in bytes
@@ -94,6 +102,18 @@ prints what it converted, and reports any value it did not recognise rather than
 into, as private Text types: the task id, state and message, for share creation and for quota
 updates. A type that already exists under the name is left as it is.
 
+`storage.0004_create_quota_on_request_types` creates the `quota_on_request` resource attribute type
+(Yes/No) and, if it's missing, the quota allocation attribute type (`QUOTA_ATTRIBUTE_NAME`, a public,
+changeable Float). Types that already exist are left as they are.
+
+Both migrations create the types under the names the settings give when `migrate` runs them, once.
+They don't follow a setting renamed afterwards, and hosts with different settings get types with
+different names. To rename one after migrating, rename the type itself (in the Django admin, say) in
+the same deploy that changes the setting; changing only the setting leaves the plugin looking for a
+type that doesn't exist. The database checks `storage.W001` and `storage.W002`, run by `migrate`,
+warn when the quota types are missing; for 0003's task types, the plugin creates a missing type the
+first time it writes one.
+
 6. Create a Resource of type 'Storage' that corresponds to your storage system. Your resource should be a unique combination of storage system parameters.
 
 7. Create a StorageHandler that corresponds to the Resource you just created and configure it with the appropriate client IDs for usage, quota, and creation. 
@@ -123,6 +143,31 @@ STORAGE_PLUGIN_CLIENTS = {
     },
 }
 ```
+
+## The quota on the request form
+
+A request for a Storage resource asks for its quota on ColdFront's own allocation request form, as the
+`storage_quota` section of `coldfront_utils.allocation_request` (see the coldfront-utils README). The
+quota is saved with the allocation, so ColdFront's admin email, `allocation_new` and everything
+listening to it see it.
+
+Every Storage resource asks, as earlier versions did on a page of their own after the request, unless
+its `quota_on_request` resource attribute (`QUOTA_ON_REQUEST_ATTRIBUTE_NAME`) is `No`. Set `No` on a
+resource whose requests shouldn't ask; its allocations then get a quota when an admin sets one. The
+attribute type exists once `migrate` has run migration 0004, so set `No` after upgrading; until then
+those resources ask, as they did before.
+
+The quota is in tenths of the plugin's units, from 0.1 to 999999.9, and is saved in plain notation.
+If no allocation attribute type is named `QUOTA_ATTRIBUTE_NAME`, a request that asks for a quota is
+refused with a message to contact support (and an error in the log), rather than failing. Two
+database checks, run by `migrate` and `check --database`, warn ahead of time: `storage.W001` when no
+resource attribute type is named `QUOTA_ON_REQUEST_ATTRIBUTE_NAME` (after renaming the setting, say),
+so no resource can be set not to ask, and `storage.W002` when no allocation attribute type, or more than
+one, is named `QUOTA_ATTRIBUTE_NAME`.
+
+The card's wording is in `storage/allocation_request/quota_intro.html`: override that template to
+change it. The request page's template must render `{{ form.request_sections }}` (ColdFront's own
+does); coldfront-utils' warning `W002` says when it doesn't.
 
 ## Storage Allocation Export
 Superusers can download a CSV of every allocation on a Resource whose resource type is `Storage` at:

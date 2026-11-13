@@ -21,12 +21,20 @@ class StorageConfig(AppConfig):
 
         if not apps.is_installed("allocation_blueprint") and ENABLE_ATTRIBUTES_ON_NEW_ALLOCATION:
             storage.signals.enable_add_attributes()
-        # Override allocation create view so users specify quota when requesting storage
+
+        # The quota is asked for on ColdFront's own request form, as a section of
+        # coldfront_utils.allocation_request, which must be installed too (check E001)
+        from coldfront_utils.allocation_request import register_request_section
+
+        from . import checks  # noqa: F401 -- registers them
+        from .request_section import StorageQuotaSection
+
+        register_request_section(StorageQuotaSection)
+
         import coldfront.core.allocation.views as allocation_views
 
-        from storage.views import AllocationAttributeEditView, AllocationCreateView
+        from storage.views import AllocationAttributeEditView
 
-        allocation_views.AllocationCreateView = AllocationCreateView
         allocation_views.AllocationAttributeEditView = AllocationAttributeEditView
 
     @staticmethod

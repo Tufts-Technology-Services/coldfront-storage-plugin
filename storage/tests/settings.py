@@ -8,6 +8,8 @@ from coldfront.config.settings import *  # noqa: F403
 
 if "storage" not in INSTALLED_APPS:  # noqa: F405
     INSTALLED_APPS = [*INSTALLED_APPS, "storage"]  # noqa: F405
+# the request form the storage_quota section adds its card to, as a deployment installs it
+INSTALLED_APPS = [*INSTALLED_APPS, "coldfront_utils.allocation_request"]
 
 # storage/urls.py is mounted by the deployment's local_urls.py, so the tests mount it too
 ROOT_URLCONF = "storage.tests.urls"
