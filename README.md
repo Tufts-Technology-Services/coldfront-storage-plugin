@@ -157,6 +157,25 @@ resource whose requests shouldn't ask; its allocations then get a quota when an 
 attribute type exists once `migrate` has run migration 0004, so set `No` after upgrading; until then
 those resources ask, as they did before.
 
+An allocation that reaches activation without a usable quota (on a resource set to `No`, from a
+request made before the quota was asked for here, or with a quota that isn't a number) doesn't fail
+the activation. Share creation records `failed`, with the message `no quota` or `invalid quota`, in
+the allocation's `share_creation_state` and `share_creation_message` attributes (see "Task state"),
+and no share is made.
+
+Nothing retries it. Setting the quota afterwards doesn't create the share, whichever way it's set:
+adding the attribute sends no signal, and approving a change request starts a quota update, which
+needs the share to exist already. (Edits on ColdFront's attribute edit page don't reach the plugin at
+all yet: its receiver filters on ColdFront's view, which the plugin replaces.) So once the quota is
+set, an admin creates the share by hand:
+
+```bash
+uv run coldfront shell -c "from storage.tasks import create_share; create_share(<allocation pk>)"
+```
+
+With `STORAGE_LOG_ONLY`, that logs what it would do instead. Retrying share creation automatically
+when the quota is saved is a possible future feature.
+
 The quota is in tenths of the plugin's units, from 0.1 to 999999.9, and is saved in plain notation.
 If no allocation attribute type is named `QUOTA_ATTRIBUTE_NAME`, a request that asks for a quota is
 refused with a message to contact support (and an error in the log), rather than failing. Two
@@ -237,7 +256,9 @@ If the task body returns a dict of its own, its keys are carried through alongsi
 other return value is kept under `result`. `message` is reserved and always wins, so a caller can
 rely on it. A task that fails still raises rather than returning, which is what keeps django-q2
 recording it as a failed task — its reason goes to the task's traceback and to the allocation's
-message attribute.
+message attribute. The dispatch tasks `create_share` and `set_storage_quota` are the exception: they
+run inside an admin's request (activating an allocation, editing its quota), not in django-q, so they
+record a failure and return, and the admin's page still loads.
 
 ### Reacting to a task's outcome
 
@@ -252,7 +273,9 @@ this one:
 
 `result` is the dict the task returns (`{"message": "successful:"}` when it returns nothing of its
 own). `message` is the reason recorded in the message attribute, and `exception` is the exception
-the task raised, or `None` for a failure recorded without one (no task or client configured).
+the task raised, the `ValueError` a dispatch task records for `missing information` (no path, say)
+or `invalid quota` (one that isn't a number, such as `1 TB`), or `None` for a failure recorded
+without one (`no quota`, no task or client configured).
 
 The signals are sent by `set_share_creation_state()` and `set_quota_update_state()`, the functions
 that record the state, so every path that records an outcome sends one: the decorated tasks, and

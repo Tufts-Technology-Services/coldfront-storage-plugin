@@ -1,4 +1,5 @@
 import logging
+import math
 
 from coldfront_utils import units_to_bytes, update_allocation_attribute_value
 from django_q.tasks import async_task
@@ -106,6 +107,21 @@ def _dispatch_result(queued: list, unconfigured: list) -> dict:
     return build_task_result(ProvisionStatus.SUCCESSFUL, message)
 
 
+def allocation_quota(allocation):
+    """The allocation's quota (QUOTA_ATTRIBUTE_NAME) as a number, or None if it has none: no attribute, or
+    a blank one. An allocation can reach activation without one, e.g. on a resource set not to ask for
+    a quota on the request form. Raises ValueError for one that isn't a finite number ("1 TB", "nan"):
+    a hand-made quota type may be Text. Converted here rather than with get_attribute(typed=True), which
+    returns the string when the conversion fails."""
+    quota = (allocation.get_attribute(QUOTA_ATTRIBUTE_NAME, expand=False, typed=False) or "").strip()
+    if not quota:
+        return None
+    number = float(quota)
+    if not math.isfinite(number):
+        raise ValueError(f"quota {quota!r} isn't a finite number")
+    return number
+
+
 def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_attribute_change_id=None):
     """
     Task to update storage quota for an allocation. This is intended to be called when an allocation is created or updated for a resource, in order to ensure that the storage quota for the allocation is updated in the storage system accordingly.
@@ -118,19 +134,25 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
     storage_handler = get_storage_handler(allocation)
     if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_id:
         client_config = get_client_config(storage_handler.quota_client_id)
-        new_quota = (
-            allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME)
-            .first()
-            .value
-        )  # todo: make sure this contains the new value.
-        new_quota_bytes = units_to_bytes(float(new_quota), units=STORAGE_PLUGIN_STORAGE_UNITS)
-        native_path = (
-            allocation.allocationattribute_set.filter(
-                allocation_attribute_type__name=client_config["native_path_attribute_name"]
+        try:
+            new_quota = allocation_quota(allocation)  # todo: make sure this contains the new value.
+        except ValueError as error:
+            # recorded, not raised: this runs inside the admin's request; the exception goes with the signal
+            logger.error(f"Allocation {allocation_pk} has an invalid {QUOTA_ATTRIBUTE_NAME}: {error}")
+            set_quota_update_state(
+                allocation, ProvisionStatus.FAILED, "invalid quota", sender=set_storage_quota, exception=error
             )
-            .first()
-            .value
-        )
+            return
+        if new_quota is None:
+            # recorded, not raised: this runs inside the admin's request. Nothing re-runs it once the quota is
+            # set (see the README's "The quota on the request form")
+            logger.warning(f"Allocation {allocation_pk} has no {QUOTA_ATTRIBUTE_NAME}. Cannot update storage quota.")
+            set_quota_update_state(allocation, ProvisionStatus.FAILED, "no quota", sender=set_storage_quota)
+            return
+        new_quota_bytes = units_to_bytes(new_quota, units=STORAGE_PLUGIN_STORAGE_UNITS)
+        native_path = (
+            allocation.get_attribute(client_config["native_path_attribute_name"], expand=False, typed=False) or ""
+        ).strip()
         if native_path and new_quota_bytes:
             if STORAGE_LOG_ONLY:
                 set_quota_update_state(allocation, ProvisionStatus.SUCCESSFUL, sender=set_storage_quota)
@@ -149,12 +171,13 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
             update_allocation_attribute_value(allocation, QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME, task_id)
             logger.debug(f"Started async task {task_id} to update storage quota for allocation {allocation_pk}.")
         else:
+            # recorded, not raised: this runs inside the admin's request (a quota edit); the exception goes
+            # with the failure signal
             logger.error(f"Missing required information to update quota for allocation {allocation_pk}.")
             error = ValueError(f"Missing required information to update quota for allocation {allocation_pk}.")
             set_quota_update_state(
                 allocation, ProvisionStatus.FAILED, "missing information", sender=set_storage_quota, exception=error
             )
-            raise error
     else:
         # storage_handler may be None here, so the message can't name its resource
         logger.warning(
@@ -175,20 +198,24 @@ def create_share(allocation_pk: int):
     if storage_handler and storage_handler.create_share_task and storage_handler.create_client_id:
         client_config = get_client_config(storage_handler.create_client_id)
         native_path = (
-            allocation.allocationattribute_set.filter(
-                allocation_attribute_type__name=client_config["native_path_attribute_name"]
+            allocation.get_attribute(client_config["native_path_attribute_name"], expand=False, typed=False) or ""
+        ).strip()
+        try:
+            quota = allocation_quota(allocation)
+        except ValueError as error:
+            # recorded, not raised: this runs inside the admin's activate request; the exception goes with
+            # the signal
+            logger.error(f"Allocation {allocation_pk} has an invalid {QUOTA_ATTRIBUTE_NAME}: {error}")
+            set_share_creation_state(
+                allocation, ProvisionStatus.FAILED, "invalid quota", sender=create_share, exception=error
             )
-            .first()
-            .value
-        )
-        quota_bytes = units_to_bytes(
-            float(
-                allocation.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME)
-                .first()
-                .value
-            ),
-            units=STORAGE_PLUGIN_STORAGE_UNITS,
-        )
+            return
+        if quota is None:
+            # recorded, not raised: this runs inside the admin's activate request (activate_storage_allocation)
+            logger.warning(f"Allocation {allocation_pk} has no {QUOTA_ATTRIBUTE_NAME}. Cannot create share.")
+            set_share_creation_state(allocation, ProvisionStatus.FAILED, "no quota", sender=create_share)
+            return
+        quota_bytes = units_to_bytes(quota, units=STORAGE_PLUGIN_STORAGE_UNITS)
         owner = allocation.project.pi.username
         group = get_allocation_group(allocation)
         if group and owner and native_path and quota_bytes:
@@ -211,12 +238,13 @@ def create_share(allocation_pk: int):
             update_allocation_attribute_value(allocation, SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME, task_id)
             logger.debug(f"Started async task {task_id} to create share for allocation {allocation_pk}.")
         else:
+            # recorded, not raised: this runs inside the admin's activate request; the exception goes with the
+            # failure signal
             logger.error(f"Missing required information to create share for allocation {allocation_pk}.")
             error = ValueError(f"Missing required information to create share for allocation {allocation_pk}.")
             set_share_creation_state(
                 allocation, ProvisionStatus.FAILED, "missing information", sender=create_share, exception=error
             )
-            raise error
     else:
         set_share_creation_state(
             allocation, ProvisionStatus.FAILED, "no share creation task or client configured", sender=create_share
