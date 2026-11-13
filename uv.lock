@@ -475,8 +475,8 @@ dev = [
 
 [[package]]
 name = "coldfront-utils"
-version = "0.1.0"
-source = { git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git#ce78928dbed1f7a16a6667633afd782d64d8d87e" }
+version = "0.3.0"
+source = { git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git#d4b8d4828e7a1b64f14d05619e1f49669bc066fc" }
 dependencies = [
     { name = "coldfront" },
 ]
