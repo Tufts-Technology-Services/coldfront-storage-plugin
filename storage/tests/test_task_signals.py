@@ -13,10 +13,13 @@ from coldfront_utils.signals import (
     share_creation_successful,
 )
 
+from coldfront.core.allocation.models import AllocationAttributeType
+
 from storage import tasks, truenas
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,
     QUOTA_UPDATE_STATE_ATTRIBUTE_NAME,
+    QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME,
     SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
     ProvisionStatus,
@@ -366,6 +369,46 @@ def test_no_path_records_missing_information_instead_of_crashing(dispatchable, t
     assert state.value == ProvisionStatus.FAILED
 
 
+def record_share_creation(allocation, state, message=""):
+    allocation.allocationattribute_set.update_or_create(
+        allocation_attribute_type=AllocationAttributeType.objects.get(name=SHARE_CREATION_STATE_ATTRIBUTE_NAME),
+        defaults={"value": state},
+    )
+
+
+@patch("storage.tasks.STORAGE_LOG_ONLY", False)
+def test_a_quota_update_records_no_share_for_an_allocation_whose_share_creation_failed(dispatchable):
+    """There's no share to update. Recorded rather than skipped: ticketing is waiting on the approved change
+    request's outcome, and files the failure as a child of that request's ticket. Once the share is
+    created, it gets the quota as it is then."""
+    record_share_creation(dispatchable, ProvisionStatus.FAILED)
+
+    with patch("storage.tasks.async_task") as queued, listening(quota_update_failed) as received:
+        tasks.set_storage_quota(dispatchable.pk)
+
+    queued.assert_not_called()
+    [sent] = received
+    assert sent["message"] == "no share" and sent["exception"] is None
+    state = dispatchable.allocationattribute_set.get(allocation_attribute_type__name=QUOTA_UPDATE_STATE_ATTRIBUTE_NAME)
+    assert state.value == ProvisionStatus.FAILED
+
+
+@pytest.mark.parametrize("share_state", [ProvisionStatus.SUCCESSFUL, None], ids=["share made", "no state recorded"])
+@patch("storage.tasks.STORAGE_LOG_ONLY", False)
+def test_a_quota_update_runs_for_an_allocation_with_a_share_or_no_recorded_state(
+    dispatchable, make_attribute_type, share_state
+):
+    """No recorded state: allocations from before the plugin recorded share creation have shares."""
+    make_attribute_type(QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME)
+    if share_state is not None:
+        record_share_creation(dispatchable, share_state)
+
+    with patch("storage.tasks.async_task", return_value="task-2") as queued:
+        tasks.set_storage_quota(dispatchable.pk)
+
+    queued.assert_called_once()
+
+
 @pytest.mark.parametrize("quota", [None, ""])
 @pytest.mark.parametrize(
     ("task", "failed", "state_attribute"),
@@ -396,8 +439,9 @@ def test_no_quota_records_failed_instead_of_crashing(dispatchable, task, failed,
 @patch("storage.tasks.get_storage_handler", return_value=None)
 def test_no_storage_handler_sends_failed_without_an_exception(mock_handler, allocation):
     with listening_to_all() as received:
-        tasks.create_share(allocation.pk)
+        # the quota update first: once share creation has failed, a quota update skips the allocation
         tasks.set_storage_quota(allocation.pk)
+        tasks.create_share(allocation.pk)
 
     [share] = received[share_creation_failed]
     [quota] = received[quota_update_failed]
