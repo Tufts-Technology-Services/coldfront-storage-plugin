@@ -1,0 +1,7 @@
+{% extends "allocation_request/card.html" %}
+{% comment %}
+The storage_quota section's card on the allocation request form. The intro text is in its own template,
+storage/allocation_request/quota_intro.html, so a site can change the wording by overriding just that.
+{% endcomment %}
+{% block heading %}Storage quota{% endblock %}
+{% block intro %}{% include "storage/allocation_request/quota_intro.html" %}{% endblock %}

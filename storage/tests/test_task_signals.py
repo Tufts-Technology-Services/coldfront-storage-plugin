@@ -311,17 +311,86 @@ def test_log_only_quota_update_sends_successful(dispatchable):
     assert received[share_creation_successful] == []
 
 
-def test_missing_information_sends_failed_with_the_raised_exception(dispatchable):
-    dispatchable.allocationattribute_set.filter(allocation_attribute_type__name="vast_path").update(value="")
+@pytest.mark.parametrize("quota", ["1 TB", "1,5", "nan", "inf"])
+@pytest.mark.parametrize(
+    ("task", "failed", "state_attribute"),
+    [
+        (tasks.create_share, share_creation_failed, SHARE_CREATION_STATE_ATTRIBUTE_NAME),
+        (tasks.set_storage_quota, quota_update_failed, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME),
+    ],
+)
+def test_a_quota_that_isnt_a_number_records_failed_instead_of_crashing(
+    dispatchable, task, failed, state_attribute, quota
+):
+    """A hand-made quota type may be Text, so its value can be anything. Recorded, not raised, as the
+    tasks run inside an admin's request; the exception goes with the signal."""
+    dispatchable.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME).update(
+        value=quota
+    )
 
-    with listening(share_creation_failed) as received:
-        with pytest.raises(ValueError) as raised:
-            tasks.create_share(dispatchable.pk)
+    with listening(failed) as received:
+        task(dispatchable.pk)
 
     [sent] = received
-    assert sent["sender"] is tasks.create_share
+    assert sent["message"] == "invalid quota"
+    assert isinstance(sent["exception"], ValueError)
+    state = dispatchable.allocationattribute_set.get(allocation_attribute_type__name=state_attribute)
+    assert state.value == ProvisionStatus.FAILED
+
+
+@pytest.mark.parametrize("path", [None, "", "  "])
+@pytest.mark.parametrize(
+    ("task", "failed", "state_attribute"),
+    [
+        (tasks.create_share, share_creation_failed, SHARE_CREATION_STATE_ATTRIBUTE_NAME),
+        (tasks.set_storage_quota, quota_update_failed, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME),
+    ],
+)
+def test_no_path_records_missing_information_instead_of_crashing(dispatchable, task, failed, state_attribute, path):
+    """A missing path attribute, or a blank one. Recorded, not raised: both tasks run inside an admin's
+    request (activating the allocation, editing its quota). The exception still goes with the signal."""
+    path_attributes = dispatchable.allocationattribute_set.filter(allocation_attribute_type__name="vast_path")
+    if path is None:
+        path_attributes.delete()
+    else:
+        path_attributes.update(value=path)
+
+    with listening(failed) as received:
+        task(dispatchable.pk)
+
+    [sent] = received
+    assert sent["sender"] is task
     assert sent["message"] == "missing information"
-    assert sent["exception"] is raised.value
+    assert isinstance(sent["exception"], ValueError)
+    state = dispatchable.allocationattribute_set.get(allocation_attribute_type__name=state_attribute)
+    assert state.value == ProvisionStatus.FAILED
+
+
+@pytest.mark.parametrize("quota", [None, ""])
+@pytest.mark.parametrize(
+    ("task", "failed", "state_attribute"),
+    [
+        (tasks.create_share, share_creation_failed, SHARE_CREATION_STATE_ATTRIBUTE_NAME),
+        (tasks.set_storage_quota, quota_update_failed, QUOTA_UPDATE_STATE_ATTRIBUTE_NAME),
+    ],
+)
+def test_no_quota_records_failed_instead_of_crashing(dispatchable, task, failed, state_attribute, quota):
+    """An allocation can reach activation without a quota (a resource set not to ask, or a request from
+    before the quota was asked for on the request form). create_share runs inside the admin's activate
+    request, so it records why rather than raising."""
+    quota_attributes = dispatchable.allocationattribute_set.filter(allocation_attribute_type__name=QUOTA_ATTRIBUTE_NAME)
+    if quota is None:
+        quota_attributes.delete()
+    else:
+        quota_attributes.update(value=quota)
+
+    with listening(failed) as received:
+        task(dispatchable.pk)
+
+    [sent] = received
+    assert sent["message"] == "no quota" and sent["exception"] is None
+    state = dispatchable.allocationattribute_set.get(allocation_attribute_type__name=state_attribute)
+    assert state.value == ProvisionStatus.FAILED
 
 
 @patch("storage.tasks.get_storage_handler", return_value=None)

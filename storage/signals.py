@@ -1,5 +1,6 @@
 import logging
 
+from coldfront_utils.signals import sent_by
 from coldfront_utils.task_context import get_acting_username
 from django.dispatch import receiver
 
@@ -53,8 +54,12 @@ def allocation_quota_changed_handler(sender, **kwargs):
             set_storage_quota(allocation_pk, allocation_attribute_change_id=attribute_pk)
 
 
-@receiver(allocation_new, sender=AllocationCreateView, dispatch_uid="add-requester-info")
+# Not sender=AllocationCreateView: coldfront_utils.allocation_request replaces the view with a subclass,
+# which the request page sends as. sent_by matches it and ColdFront's own.
+@receiver(allocation_new, dispatch_uid="add-requester-info")
 def add_allocation_requester_info(sender, **kwargs):
+    if not sent_by(sender, AllocationCreateView):
+        return
     allocation_pk = kwargs.get("allocation_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
     if allocation.resources.first().resource_type.name == "Storage":
@@ -91,14 +96,16 @@ def allocation_activate_user_add_folder_creation_handler(sender, **kwargs):
 
 
 def enable_add_attributes():
+    # any sender: the handler checks it with sent_by, as add_allocation_requester_info does
     allocation_new.connect(
         add_attributes_to_new_storage_allocation_handler,
-        sender=AllocationCreateView,
         dispatch_uid="add_storage_attributes_to_new_allocation",
     )
 
 
 def add_attributes_to_new_storage_allocation_handler(sender, **kwargs):
+    if not sent_by(sender, AllocationCreateView):
+        return
     allocation_pk = kwargs.get("allocation_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
     if allocation.resources.first().resource_type.name == "Storage":

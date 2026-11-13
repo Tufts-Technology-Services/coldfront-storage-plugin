@@ -2,19 +2,6 @@ from django import forms
 
 from coldfront.core.allocation.models import AllocationAttribute
 
-from .constants import QUOTA_ATTRIBUTE_NAME, STORAGE_PLUGIN_STORAGE_UNITS
-
-
-class StorageAllocationRequestDetailsForm(forms.Form):
-    """Form for specifying storage quota when completing a storage allocation request."""
-
-    quota_request = forms.DecimalField(
-        label=QUOTA_ATTRIBUTE_NAME,
-        required=True,
-        widget=forms.NumberInput(attrs={"step": "0.1", "min": "0.1", "class": "form-control"}),
-        help_text=f"Specify the storage quota in {STORAGE_PLUGIN_STORAGE_UNITS} for your allocation. (minimum 0.1)",
-    )
-
 
 class AllocationAttributeEditForm(forms.Form):
     attribute_pk = forms.IntegerField(required=False, disabled=True)
