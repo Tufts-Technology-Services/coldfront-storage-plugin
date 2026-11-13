@@ -5,14 +5,12 @@ ActingUserMiddleware sets for each web request, and which a running task carries
 that queued it.
 """
 
+from coldfront_utils.allocation_request.views import AllocationRequestCreateView
 from coldfront_utils.task_context import acting_as
 
 from coldfront.core.allocation.signals import allocation_change_created, allocation_new
 
-# the classes the receivers are connected to: StorageConfig.ready() then swaps storage's own
-# AllocationCreateView into coldfront.core.allocation.views, so importing it from there would send
-# as a class nothing listens for
-from storage.signals import AllocationChangeView, AllocationCreateView
+from storage.signals import AllocationChangeView
 
 
 def stamp_value(allocation, attribute_name):
@@ -25,7 +23,7 @@ def test_a_new_allocation_is_stamped_with_whoever_is_acting(storage_resource, ma
     allocation = make_allocation(storage_resource)
 
     with acting_as("pi01"):
-        allocation_new.send(sender=AllocationCreateView, allocation_pk=allocation.pk)
+        allocation_new.send(sender=AllocationRequestCreateView, allocation_pk=allocation.pk)
 
     assert stamp_value(allocation, "allocation_requester") == "pi01"
 
@@ -42,6 +40,18 @@ def test_a_change_request_is_stamped_with_whoever_is_acting(storage_resource, ma
 def test_with_nobody_acting_the_requester_is_unknown(storage_resource, make_allocation):
     allocation = make_allocation(storage_resource)
 
-    allocation_new.send(sender=AllocationCreateView, allocation_pk=allocation.pk)
+    allocation_new.send(sender=AllocationRequestCreateView, allocation_pk=allocation.pk)
 
     assert stamp_value(allocation, "allocation_requester") == "unknown"
+
+
+def test_allocation_new_from_elsewhere_is_not_stamped(storage_resource, make_allocation):
+    # e.g. Allocation.add_user's signals send sender=None; only the request page's allocation_new counts
+    allocation = make_allocation(storage_resource)
+
+    with acting_as("pi01"):
+        allocation_new.send(sender=None, allocation_pk=allocation.pk)
+
+    assert not allocation.allocationattribute_set.filter(
+        allocation_attribute_type__name="allocation_requester"
+    ).exists()
