@@ -165,9 +165,9 @@ and no share is made.
 
 Nothing retries it. Setting the quota afterwards doesn't create the share, whichever way it's set:
 adding the attribute sends no signal, and approving a change request starts a quota update, which
-needs the share to exist already. (Edits on ColdFront's attribute edit page don't reach the plugin at
-all yet: its receiver filters on ColdFront's view, which the plugin replaces.) So once the quota is
-set, an admin creates the share by hand:
+records `failed` with the message `no share` for an allocation whose share creation failed (ticketing
+then files it against the change request). So once the quota is set, an admin creates the share by
+hand, which uses the quota as it is then:
 
 ```bash
 uv run coldfront shell -c "from storage.tasks import create_share; create_share(<allocation pk>)"
@@ -175,6 +175,10 @@ uv run coldfront shell -c "from storage.tasks import create_share; create_share(
 
 With `STORAGE_LOG_ONLY`, that logs what it would do instead. Retrying share creation automatically
 when the quota is saved is a possible future feature.
+
+A quota changed while share creation is still `scheduled` (waiting for Active Directory, say) is a
+gap: the share is created with the quota it was queued with, and the quota update finds no share yet.
+Change the quota again once the share exists.
 
 The quota is in tenths of the plugin's units, from 0.1 to 999999.9, and is saved in plain notation.
 If no allocation attribute type is named `QUOTA_ATTRIBUTE_NAME`, a request that asks for a quota is
@@ -275,7 +279,7 @@ this one:
 own). `message` is the reason recorded in the message attribute, and `exception` is the exception
 the task raised, the `ValueError` a dispatch task records for `missing information` (no path, say)
 or `invalid quota` (one that isn't a number, such as `1 TB`), or `None` for a failure recorded
-without one (`no quota`, no task or client configured).
+without one (`no quota`, `no share`, no task or client configured).
 
 The signals are sent by `set_share_creation_state()` and `set_quota_update_state()`, the functions
 that record the state, so every path that records an outcome sends one: the decorated tasks, and
@@ -450,8 +454,17 @@ storage allocation and storage quotas based on allocation events. These include:
 - `allocation_new`: Triggered when a new allocation is created. The plugin will add needed storage attributes to the allocation based on the storage client configuration.
 - `allocation_activate`: Triggered when an allocation is activated (moved to status 'Active'). The plugin will create 
 the necessary storage for the allocation and set the appropriate quotas.
-- `allocation_attribute_changed`: Triggered when an allocation attribute is changed. The plugin will update the 
-storage usage and quotas accordingly if the changed attribute is relevant to storage (e.g., allocation size).
+- `allocation_attribute_changed`: Triggered when an allocation attribute is changed, on the attribute edit page or by
+approving a change request. When an approved change request changes the quota, the plugin updates it on the storage
+system. Only then: the quota changes through change requests, which the ticketing plugin follows from request to
+done, so the plugin's attribute edit page (which replaces ColdFront's) shows the quota read-only, with a link to make
+a change request instead.
+- `allocation_change_created`: Triggered when a change request is made. The plugin records who asked.
+
+ColdFront sends these with the view that sent them as sender, and plugins replace some of those views with subclasses
+(the billing plugin replaces the change request page). So the receivers take any sender
+and check it with `coldfront_utils.signals.sent_by`, which matches ColdFront's view and its subclasses, rather than
+connecting with `sender=`, which would only match the original class and never fire.
 
 
 ## Security Considerations

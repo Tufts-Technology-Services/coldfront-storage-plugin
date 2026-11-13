@@ -29,7 +29,18 @@
           </thead>
           <tbody>
             {% for form in formset %}
-              {% if form.is_private.value %}
+              {% if form.read_only.value %}
+            <tr class="d-flex">
+              <td class="col-6">{{form.name.value}}</td>
+              <td class="col-6">
+                {{form.value}}
+                <small class="form-text text-muted">
+                  <i class="fas fa-info-circle" aria-hidden="true"></i>
+                  Change the quota with a <a href="{% url 'allocation-change' allocation.pk %}">change request</a>.
+                </small>
+              </td>
+            </tr>
+              {% elif form.is_private.value %}
                   <tr class="d-flex" style="background-color:#eee">
                     <td class="col-6"><i class="fas fa-lock" aria-hidden="true"></i> {{form.name.value}}</td>
                     <td class="col-6">{{form.value}}

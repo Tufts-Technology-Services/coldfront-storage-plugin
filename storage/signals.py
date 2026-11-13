@@ -13,7 +13,6 @@ from coldfront.core.allocation.signals import (
     allocation_new,
 )
 from coldfront.core.allocation.views import (
-    AllocationAttributeEditView,
     AllocationChangeDetailView,
     AllocationChangeView,
     AllocationCreateView,
@@ -40,9 +39,17 @@ def activate_storage_allocation(sender, **kwargs):
         create_share(allocation_pk)
 
 
-@receiver(allocation_attribute_changed, sender=AllocationChangeDetailView)
-@receiver(allocation_attribute_changed, sender=AllocationAttributeEditView)
+# Not sender=: ColdFront sends these signals with sender=self.__class__, and plugins replace views with
+# subclasses (billing replaces AllocationChangeView), so a filter on ColdFront's class may never fire.
+# sent_by matches the subclasses too.
+
+
+@receiver(allocation_attribute_changed, dispatch_uid="storage-quota-changed")
 def allocation_quota_changed_handler(sender, **kwargs):
+    # Only an approved change request changes the quota on the storage system: it's the path ticketing
+    # follows from request to done. The attribute edit page shows the quota read-only (storage.views).
+    if not sent_by(sender, AllocationChangeDetailView):
+        return
     allocation_pk = kwargs.get("allocation_pk")
     attribute_pk = kwargs.get("attribute_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
@@ -67,8 +74,10 @@ def add_allocation_requester_info(sender, **kwargs):
         stamp_allocation_requester(allocation, requester)
 
 
-@receiver(allocation_change_created, sender=AllocationChangeView, dispatch_uid="add-change-requester-info")
+@receiver(allocation_change_created, dispatch_uid="add-change-requester-info")
 def add_change_requester_info(sender, **kwargs):
+    if not sent_by(sender, AllocationChangeView):
+        return
     allocation_pk = kwargs.get("allocation_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
     if allocation.resources.first().resource_type.name == "Storage":

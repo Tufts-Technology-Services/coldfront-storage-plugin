@@ -9,6 +9,7 @@ from coldfront.core.allocation.models import Allocation, AllocationAttribute, Al
 from storage.constants import (
     QUOTA_ATTRIBUTE_NAME,
     QUOTA_UPDATE_TASK_ID_ATTRIBUTE_NAME,
+    SHARE_CREATION_STATE_ATTRIBUTE_NAME,
     SHARE_CREATION_TASK_ID_ATTRIBUTE_NAME,
     STORAGE_LOG_ONLY,
     STORAGE_PLUGIN_STORAGE_UNITS,
@@ -130,6 +131,16 @@ def set_storage_quota(allocation_pk: int, allocation_change_id=None, allocation_
         logger.info("STORAGE_LOG_ONLY is set to True. Skipping actual update of storage quota and just logging info.")
 
     allocation = Allocation.objects.get(id=allocation_pk)
+    share_state = allocation.get_attribute(SHARE_CREATION_STATE_ATTRIBUTE_NAME, expand=False, typed=False)
+    if share_state == ProvisionStatus.FAILED:
+        # No share to update. Recorded, not skipped: ticketing is waiting on the approved change request's
+        # outcome and files this as a child of its ticket. Share creation uses the quota as it is when it
+        # runs. No recorded state at all is updated as before: older allocations have shares.
+        logger.warning(
+            f"Allocation {allocation_pk}'s share creation failed, so there's no share to update the quota of."
+        )
+        set_quota_update_state(allocation, ProvisionStatus.FAILED, "no share", sender=set_storage_quota)
+        return
     set_quota_update_state(allocation, ProvisionStatus.STARTED, sender=set_storage_quota)
     storage_handler = get_storage_handler(allocation)
     if storage_handler and storage_handler.set_quota_task and storage_handler.quota_client_id:
