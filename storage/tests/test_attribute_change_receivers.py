@@ -12,13 +12,17 @@ from coldfront_utils.task_context import acting_as
 from django.urls import reverse
 
 from coldfront.core.allocation import views as allocation_views
-from coldfront.core.allocation.signals import allocation_attribute_changed
+from coldfront.core.allocation.signals import allocation_attribute_changed, allocation_change_created
 
 from storage import signals
 from storage.constants import QUOTA_ATTRIBUTE_NAME
 from storage.views import AllocationAttributeEditView as StorageAttributeEditView
 
 pytestmark = pytest.mark.django_db
+
+
+class BillingAllocationChangeView(allocation_views.AllocationChangeView):
+    """Stands in for billing's replacement of ColdFront's change request view."""
 
 
 @pytest.fixture
@@ -120,3 +124,24 @@ def test_posting_a_new_quota_on_the_edit_page_changes_nothing_but_other_attribut
         == "/projects/q"
     )
     set_storage_quota.assert_not_called()
+
+
+# -- A change request is stamped with who asked -----------------------------------------------------
+
+
+def test_a_change_request_through_billings_page_is_stamped(storage_resource, make_allocation):
+    allocation = make_allocation(storage_resource)
+
+    with acting_as("pi01"):
+        allocation_change_created.send(sender=BillingAllocationChangeView, allocation_pk=allocation.pk)
+
+    assert has_stamp(allocation, "quota_requester")
+
+
+def test_a_change_request_from_elsewhere_is_not_stamped(storage_resource, make_allocation):
+    allocation = make_allocation(storage_resource)
+
+    with acting_as("pi01"):
+        allocation_change_created.send(sender=None, allocation_pk=allocation.pk)
+
+    assert not has_stamp(allocation, "quota_requester")

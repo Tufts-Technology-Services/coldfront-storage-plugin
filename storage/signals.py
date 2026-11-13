@@ -74,8 +74,10 @@ def add_allocation_requester_info(sender, **kwargs):
         stamp_allocation_requester(allocation, requester)
 
 
-@receiver(allocation_change_created, sender=AllocationChangeView, dispatch_uid="add-change-requester-info")
+@receiver(allocation_change_created, dispatch_uid="add-change-requester-info")
 def add_change_requester_info(sender, **kwargs):
+    if not sent_by(sender, AllocationChangeView):
+        return
     allocation_pk = kwargs.get("allocation_pk")
     allocation = Allocation.objects.get(pk=allocation_pk)
     if allocation.resources.first().resource_type.name == "Storage":
