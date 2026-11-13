@@ -7,7 +7,9 @@ deployment, then swaps in an in-memory database so the tests need no services.
 from coldfront.config.settings import *  # noqa: F403
 
 if "storage" not in INSTALLED_APPS:  # noqa: F405
-    INSTALLED_APPS = [*INSTALLED_APPS, "storage"]  # noqa: F405
+    # near the front, as the deployment puts it (coldfront-ansible's `first: true`): its templates, such as
+    # allocation/allocation_attribute_edit.html, override ColdFront's
+    INSTALLED_APPS = [INSTALLED_APPS[0], "storage", *INSTALLED_APPS[1:]]  # noqa: F405
 # the request form the storage_quota section adds its card to, as a deployment installs it
 INSTALLED_APPS = [*INSTALLED_APPS, "coldfront_utils.allocation_request"]
 

@@ -1,5 +1,6 @@
 from coldfront.core.allocation.views import AllocationAttributeEditView as ColdfrontAllocationAttributeEditView
 
+from ..constants import QUOTA_ATTRIBUTE_NAME
 from ..forms import AllocationAttributeEditForm
 
 
@@ -16,6 +17,8 @@ class AllocationAttributeEditView(ColdfrontAllocationAttributeEditView):
                 "orig_value": attribute.value,
                 "value": attribute.value,
                 "is_private": attribute.allocation_attribute_type.is_private,
+                # the quota changes only through a change request, which ticketing follows to done
+                "read_only": attribute.allocation_attribute_type.name == QUOTA_ATTRIBUTE_NAME,
             }
             for attribute in attributes_to_change
         ]

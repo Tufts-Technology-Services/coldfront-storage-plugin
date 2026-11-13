@@ -9,10 +9,14 @@ class AllocationAttributeEditForm(forms.Form):
     orig_value = forms.CharField(max_length=150, required=False, disabled=True)
     value = forms.CharField(max_length=150, required=False, disabled=False)
     is_private = forms.BooleanField(required=False, disabled=True)
+    # set by the view for the quota: a disabled field keeps its original value whatever is posted
+    read_only = forms.BooleanField(required=False, disabled=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["attribute_pk"].widget = forms.HiddenInput()
+        if self.initial.get("read_only"):
+            self.fields["value"].disabled = True
 
     def clean(self):
         cleaned_data = super().clean()
