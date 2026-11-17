@@ -31,6 +31,13 @@ class StorageConfig(AppConfig):
 
         register_request_section(StorageQuotaSection)
 
+        # a person's home and scratch, served by the REST API (coldfront-rest-api-plugin) if it's installed
+        from coldfront_utils.api_extensions import register_api_extension
+
+        from .api_extension import StorageAreas
+
+        register_api_extension(StorageAreas)
+
         import coldfront.core.allocation.views as allocation_views
 
         from storage.views import AllocationAttributeEditView
