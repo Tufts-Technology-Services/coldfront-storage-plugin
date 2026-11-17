@@ -192,6 +192,41 @@ The card's wording is in `storage/allocation_request/quota_intro.html`: override
 change it. The request page's template must render `{{ form.request_sections }}` (ColdFront's own
 does); coldfront-utils' warning `W002` says when it doesn't.
 
+## Home and scratch in the REST API
+
+The plugin serves a person's own storage areas, such as their home and scratch, through the REST API
+(coldfront-rest-api-plugin), as its `storage` extension: `storage/api_extension.py`, registered with
+`coldfront_utils.api_extensions` in `StorageConfig.ready()`. Neither plugin imports the other; without
+the API installed, the extension isn't served.
+
+- `GET /api/v2/users/<username>/storage/`: the areas, by key (`{"key": "home"}`), in settings order.
+  Asks no storage system.
+- `GET /api/v2/users/<username>/storage/<area>/`: the person's user quota and usage in that area,
+  from VAST: soft and hard limits, whether they're the area's default or an override, `used_bytes`,
+  and when VAST last recalculated usage (every minute or two). Answers are cached for two minutes.
+
+The areas are a setting, mapping each area's key to its `STORAGE_PLUGIN_CLIENTS` entry and the path
+of its directory quota there:
+
+```python
+USER_STORAGE_AREAS = {
+    "home": {"client": "hpc", "path": "/homedir"},
+    "scratch": {"client": "hpc", "path": "/scratch"},
+}
+```
+
+Unset, there are no areas. A malformed setting, or one naming a client that isn't in
+`STORAGE_PLUGIN_CLIENTS`, is the system check error `storage.E002`. Every area's client is taken to be
+a VAST, so this needs the `vast` extra.
+
+- **Who sees whose:** a person sees their own; superusers and holders of the plugin's
+  `storage.view_any_storage` ("Can look up anyone's home and scratch through the REST API") see
+  anyone's. ColdFront's own permissions, and the API's `rest_api.view_any_person`, don't open it, so a
+  service account reading storage needs `storage.view_any_storage` as well.
+- **With `STORAGE_LOG_ONLY` on** (the default), nothing is asked of VAST: an area answers 503,
+  "Storage lookups are off on this host." VAST failing is a 503 too, without VAST's own error text,
+  which is logged.
+
 ## Storage Allocation Export
 Superusers can download a CSV of every allocation on a Resource whose resource type is `Storage` at:
 

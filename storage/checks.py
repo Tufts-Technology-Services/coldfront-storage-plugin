@@ -2,6 +2,7 @@
 
 from coldfront_utils.attribute.checks import attribute_type_warnings
 from django.apps import apps
+from django.conf import settings
 from django.core import checks
 
 from coldfront.core.allocation.models import AllocationAttributeType
@@ -44,4 +45,52 @@ def check_quota_types(app_configs, databases=None, **kwargs):
         databases=databases,
         check_id="storage.W002",
         consequence="allocation requests that ask for a quota are refused",
+    )
+
+
+@checks.register()
+def check_user_storage_areas(app_configs, **kwargs):
+    """E002 for each way USER_STORAGE_AREAS is malformed, if it's set. Unset, there are no storage
+    areas."""
+    areas = getattr(settings, "USER_STORAGE_AREAS", None)
+    if areas is None:
+        return []
+    if not isinstance(areas, dict):
+        return [user_storage_area_error("USER_STORAGE_AREAS must be a dict of areas.")]
+    client_keys = {entry.get("client_key") for entry in getattr(settings, "STORAGE_PLUGIN_CLIENTS", None) or []}
+    errors = []
+    for name, area in areas.items():
+        if not name or "/" in str(name):
+            # the name is a URL segment: storage/<area>/
+            errors.append(user_storage_area_error(f"The storage area name {name!r} must be non-empty, with no slash."))
+        elif not isinstance(area, dict):
+            errors.append(
+                user_storage_area_error(f"USER_STORAGE_AREAS[{name!r}] must be a dict with a client and a path.")
+            )
+        elif not area.get("client"):
+            errors.append(user_storage_area_error(f"USER_STORAGE_AREAS[{name!r}] names no client."))
+        elif not str(area.get("path") or "").startswith("/"):
+            errors.append(
+                user_storage_area_error(
+                    f"USER_STORAGE_AREAS[{name!r}] needs an absolute path, not {area.get('path')!r}."
+                )
+            )
+        elif area["client"] not in client_keys:
+            errors.append(
+                user_storage_area_error(
+                    f"USER_STORAGE_AREAS[{name!r}] names client {area['client']!r}, which isn't in "
+                    "STORAGE_PLUGIN_CLIENTS."
+                )
+            )
+    return errors
+
+
+def user_storage_area_error(message):
+    return checks.Error(
+        message,
+        hint=(
+            "USER_STORAGE_AREAS maps each area to the STORAGE_PLUGIN_CLIENTS entry it lives on and its "
+            'directory quota there: {"home": {"client": "hpc", "path": "/homedir"}}.'
+        ),
+        id="storage.E002",
     )
