@@ -475,8 +475,8 @@ dev = [
 
 [[package]]
 name = "coldfront-utils"
-version = "0.3.1"
-source = { git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git#3ec711dc3ed24174c503e7b6a5ea3a9e638876bf" }
+version = "0.4.0"
+source = { git = "https://github.com/Tufts-Technology-Services/coldfront-utils.git#e0a7e62b0104c4b1093f0e1a29ac93aff97421bd" }
 dependencies = [
     { name = "coldfront" },
 ]
@@ -1984,7 +1984,7 @@ wheels = [
 [[package]]
 name = "vast-api-client"
 version = "0.4.0"
-source = { git = "https://github.com/Tufts-Technology-Services/vast-api-client.git#471c96779a2007ff08c44506b9b3e13b659d27ed" }
+source = { git = "https://github.com/Tufts-Technology-Services/vast-api-client.git#975e1a23f615b9cb60aa3ee32bf6d809bc71dd34" }
 dependencies = [
     { name = "certifi" },
     { name = "pydantic" },
