@@ -315,4 +315,4 @@ def get_vast_params(client_config_id: str):
 def native_path_to_cluster_path(vast_path: str, client_config_id: str) -> str:
     vast_params = get_vast_params(client_config_id=client_config_id)
     cluster_path_template = vast_params.get("cluster_path_template")
-    return cluster_path_template.format(directory_name=Path(vast_path).name.lstrip("/").lower())
+    return cluster_path_template.format(directory_name=Path(vast_path).name.lstrip("/"))

@@ -98,8 +98,8 @@ def test_create_project_share_records_success(mock_provision, mock_check, mock_s
     """A fully successful run must end at success, not at the pending it started from."""
     project.create_project_share("/Projects/P", 10, "owner", "group", "hpc", allocation.pk)
 
-    mock_provision.assert_called_once_with(native_path="/projects/p", quota_bytes=10, client_config_id="hpc")
-    # the folder steps keep the un-lowercased path they were always given
+    # the path as the allocation holds it: storage.tasks.create_share checked its case
+    mock_provision.assert_called_once_with(native_path="/Projects/P", quota_bytes=10, client_config_id="hpc")
     mock_check.assert_called_once_with("/Projects/P", client_config_id="hpc")
     assert state_of(allocation) == ProvisionStatus.SUCCESSFUL
 
@@ -161,7 +161,7 @@ def test_create_course_share_records_success(
 
     course.create_course_share("/Courses/C", 10, "owner", "group", "hpc", allocation.pk)
 
-    mock_provision.assert_called_once_with(native_path="/courses/c", quota_bytes=10, client_config_id="hpc")
+    mock_provision.assert_called_once_with(native_path="/Courses/C", quota_bytes=10, client_config_id="hpc")
     assert state_of(allocation) == ProvisionStatus.SUCCESSFUL
 
 

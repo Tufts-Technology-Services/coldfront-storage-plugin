@@ -46,7 +46,7 @@ def create_project_share(
     # skipped once VAST is done, so waiting for the cluster directory doesn't repeat them either
     if not share_provisioned:
         provision_share(
-            native_path=native_path.lower(),
+            native_path=native_path,
             quota_bytes=quota_bytes,
             client_config_id=client_config_id,
         )
