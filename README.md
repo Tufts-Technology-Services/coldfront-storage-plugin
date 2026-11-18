@@ -124,6 +124,7 @@ The client IDs should correspond to the keys in the `STORAGE_PLUGIN_CLIENTS` set
 ```python
 STORAGE_PLUGIN_CLIENTS = {
     "hpc": {
+        "type": "vast",  # which kind of system: vast, truenas or starfish (storage.W003 if missing)
         "host": "vast_host",
         "user": "vast_user",
         "password": "vast_password",
@@ -137,6 +138,7 @@ STORAGE_PLUGIN_CLIENTS = {
         "native_path_attribute_name": "vast_path",  # name of the allocation attribute that will hold the native path value for this client
     },
     "truenas": {
+        "type": "truenas",
         "host": "truenas_host",
         "api_key": "truenas_api_key",
         "native_path_attribute_name": "truenas_path",  # name of the allocation attribute that will hold the native path value for this client
@@ -226,6 +228,46 @@ a VAST, so this needs the `vast` extra.
 - **With `STORAGE_LOG_ONLY` on** (the default), nothing is asked of VAST: an area answers 503,
   "Storage lookups are off on this host." VAST failing is a 503 too, without VAST's own error text,
   which is logged.
+
+## Allocation usage in the REST API
+
+The plugin's second extension, `usage`, serves one storage allocation's quota and usage at
+`GET /api/v2/allocations/<id>/usage/` (`storage/allocation_usage.py`, registered beside `storage`).
+Every answer has the same keys, whatever the source, with null where a source has nothing:
+
+```json
+{
+  "extension": "usage", "version": 1,
+  "allocation": 9031, "project": {"id": 412, "title": "Ocean Modelling"}, "resource": "Tier 3 Storage",
+  "path": "/cluster/tufts/ocean",
+  "limit_bytes": 10000000000000, "used_bytes": 6000000000000, "state": "ok",
+  "measured_at": "2026-11-18T14:05:12.402113+00:00", "limit_reported_at": "2026-11-18T14:05:12.402113+00:00",
+  "stored_used_bytes": 6150000000000, "stored_usage_reported_at": "2026-11-03T03:00:00-05:00"
+}
+```
+
+- **Where it looks:** the allocation's resource's `StorageHandler` names its client
+  (`quota_client_id`), and the client's `"type"` says how to answer. An allocation on no resource with
+  a handler is a 404. A client with no known `type` is a 503, and the system check warning
+  `storage.W003`.
+- **`vast`: live.** One quota lookup at the allocation's path (its `native_path_attribute_name`
+  attribute), cached for two minutes. `used_bytes` is the quota's `used_capacity`. No path, or no
+  quota at it, is a 404. With `STORAGE_LOG_ONLY` on, nothing is asked: a 503. VAST failing is a 503
+  without VAST's words, which are logged.
+- **`truenas`: stored.** ColdFront's own values, asking nothing: the quota the
+  TrueNAS batch task stored and the usage Starfish's stored, with their report dates.
+- **`limit_bytes`** is the soft limit if there is one, else the hard limit; a limit of 0 is no limit.
+  **`state`** is `ok`, `over_limit` (usage above `limit_bytes`) or null.
+- **`stored_used_bytes`** is the figure ColdFront shows, `reported_usage_bytes` from the Starfish
+  task (up to a day old). For a VAST allocation it differs from the live `used_bytes`; ColdFront
+  keeps showing Starfish's.
+- **The answer doesn't say which system it came from;** the dates say how fresh it is.
+- **`path`** is the allocation's Storage Path (`CLUSTER_PATH_ATTRIBUTE_NAME`), the path people use.
+  If that attribute type is private, only superusers see it; for anyone else it's null, as on
+  ColdFront's pages. The path on the storage system (`vast_path`, `truenas_path`) is never in the
+  answer.
+- **Who sees it:** anyone ColdFront's allocation page would show the allocation to
+  (`coldfront_utils.api_extensions.can_view_allocation`).
 
 ## Storage Allocation Export
 Superusers can download a CSV of every allocation on a Resource whose resource type is `Storage` at:
