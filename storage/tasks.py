@@ -1,7 +1,9 @@
 import logging
 import math
+from pathlib import PurePosixPath
 
 from coldfront_utils import units_to_bytes, update_allocation_attribute_value
+from django.conf import settings
 from django_q.tasks import async_task
 
 from coldfront.core.allocation.models import Allocation, AllocationAttribute, AllocationAttributeType, AttributeType
@@ -33,6 +35,12 @@ from storage.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def lowercase_share_names_required() -> bool:
+    """Whether a new share's name must be lowercase: the STORAGE_REQUIRE_LOWERCASE_SHARE_NAMES setting, on by
+    default. Only creating a share is checked; existing shares keep their case."""
+    return getattr(settings, "STORAGE_REQUIRE_LOWERCASE_SHARE_NAMES", True)
 
 
 def get_storage_usage_batch():
@@ -230,6 +238,23 @@ def create_share(allocation_pk: int):
         owner = allocation.project.pi.username
         group = get_allocation_group(allocation)
         if group and owner and native_path and quota_bytes:
+            share_name = PurePosixPath(native_path).name
+            if lowercase_share_names_required() and share_name != share_name.lower():
+                # recorded, not raised: this runs inside the admin's activate request. Checked before
+                # STORAGE_LOG_ONLY, so a test deployment refuses what production would
+                error = ValueError(
+                    f"Allocation {allocation_pk}'s new share {native_path} isn't lowercase. Make its path lowercase, "
+                    "or set STORAGE_REQUIRE_LOWERCASE_SHARE_NAMES = False to allow mixed case."
+                )
+                logger.error(str(error))
+                set_share_creation_state(
+                    allocation,
+                    ProvisionStatus.FAILED,
+                    "share name isn't lowercase",
+                    sender=create_share,
+                    exception=error,
+                )
+                return
             if STORAGE_LOG_ONLY:
                 set_share_creation_state(allocation, ProvisionStatus.SUCCESSFUL, sender=create_share)
                 logger.info("--STORAGE_LOG_ONLY")

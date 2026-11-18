@@ -146,6 +146,16 @@ STORAGE_PLUGIN_CLIENTS = {
 }
 ```
 
+9. Optionally, allow new shares with mixed-case names, in `local_settings.py`:
+```python
+STORAGE_REQUIRE_LOWERCASE_SHARE_NAMES = False  # default True
+```
+By default, creating a share whose name (the last part of its path) isn't lowercase fails with
+`share name isn't lowercase`, and nothing is created. The check applies only when a share is created,
+and to its name, not to the directories above it or to the group. Shares that already exist keep
+whatever case they have: quota changes, usage and the cluster folders use the allocation's path
+exactly as stored, and the plugin never lowercases a path itself.
+
 ## The quota on the request form
 
 A request for a Storage resource asks for its quota on ColdFront's own allocation request form, as the
