@@ -94,3 +94,26 @@ def user_storage_area_error(message):
         ),
         id="storage.E002",
     )
+
+
+# the kinds of system a STORAGE_PLUGIN_CLIENTS entry can be; the usage extension reads it
+STORAGE_CLIENT_TYPES = ("vast", "truenas", "starfish")
+
+
+@checks.register()
+def check_client_types(app_configs, **kwargs):
+    """W003 for each STORAGE_PLUGIN_CLIENTS entry whose "type" isn't one the plugin knows. Only the
+    usage extension needs it, so the rest of the plugin works without: a warning, not an error."""
+    return [
+        checks.Warning(
+            f"STORAGE_PLUGIN_CLIENTS entry {entry.get('client_key')!r} has type {entry.get('type')!r}, "
+            f"not one of {', '.join(STORAGE_CLIENT_TYPES)}.",
+            hint=(
+                'Add "type" to the entry. Until then, /api/v2/allocations/<id>/usage/ answers 503 for '
+                "allocations on it."
+            ),
+            id="storage.W003",
+        )
+        for entry in getattr(settings, "STORAGE_PLUGIN_CLIENTS", None) or []
+        if entry.get("type") not in STORAGE_CLIENT_TYPES
+    ]

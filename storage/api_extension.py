@@ -1,6 +1,8 @@
 """
-The storage extension of the REST API: a person's home and scratch, at
-/api/v2/users/<username>/storage/ and, for one area, /api/v2/users/<username>/storage/<area>/.
+The storage plugin's extensions of the REST API:
+- storage: a person's home and scratch, at /api/v2/users/<username>/storage/ and, for one area,
+  /api/v2/users/<username>/storage/<area>/;
+- usage: one storage allocation's quota and usage, at /api/v2/allocations/<id>/usage/.
 
 Registered with coldfront_utils.api_extensions in StorageConfig.ready(); the API (coldfront-rest-api-
 plugin) serves it without importing this plugin. See "Plugin extensions" in that plugin's
@@ -9,8 +11,15 @@ docs/rest-api-plan.md.
 
 import logging
 
-from coldfront_utils.api_extensions import ExtensionNotFound, ExtensionUnavailable, PersonExtension
+from coldfront_utils.api_extensions import (
+    AllocationExtension,
+    ExtensionNotFound,
+    ExtensionUnavailable,
+    PersonExtension,
+    can_view_allocation,
+)
 
+from storage.allocation_usage import NoUsage, lookup_allocation_usage
 from storage.user_storage import StorageLookupsOff, StorageUnavailable, configured_areas, lookup_user_storage
 
 logger = logging.getLogger(__name__)
@@ -52,5 +61,30 @@ class StorageAreas(PersonExtension):
             raise ExtensionUnavailable(LOOKUPS_OFF) from None
         except StorageUnavailable as error:
             logger.error("Storage lookup failed: %s", error)
+            raise ExtensionUnavailable(UNAVAILABLE) from None
+        return {"extension": self.name, "version": self.version, **answer}
+
+
+class AllocationUsage(AllocationExtension):
+    """One storage allocation's quota and usage: live from VAST, or as ColdFront stored it for TrueNAS."""
+
+    name = "usage"
+    description = "A storage allocation's quota and usage: live from VAST, stored for TrueNAS"
+    version = 1
+
+    def allows(self, target, caller):
+        """Anyone ColdFront's allocation page would show the allocation to."""
+        return can_view_allocation(caller, target)
+
+    def summary(self, target, caller, params):
+        """The quota and usage. A 404 for an allocation that isn't storage or has no quota."""
+        try:
+            answer = lookup_allocation_usage(target, caller)
+        except NoUsage:
+            raise ExtensionNotFound(target.pk) from None
+        except StorageLookupsOff:
+            raise ExtensionUnavailable(LOOKUPS_OFF) from None
+        except StorageUnavailable as error:
+            logger.error("Usage lookup for allocation %s failed: %s", target.pk, error)
             raise ExtensionUnavailable(UNAVAILABLE) from None
         return {"extension": self.name, "version": self.version, **answer}

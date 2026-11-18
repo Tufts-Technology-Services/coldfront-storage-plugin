@@ -34,9 +34,10 @@ class StorageConfig(AppConfig):
         # a person's home and scratch, served by the REST API (coldfront-rest-api-plugin) if it's installed
         from coldfront_utils.api_extensions import register_api_extension
 
-        from .api_extension import StorageAreas
+        from .api_extension import AllocationUsage, StorageAreas
 
         register_api_extension(StorageAreas)
+        register_api_extension(AllocationUsage)
 
         import coldfront.core.allocation.views as allocation_views
 
