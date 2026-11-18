@@ -11,12 +11,15 @@ by username or, for some people, by UID. VAST recalculates their usage every min
 """
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from coldfront_utils import get_uid, ttl_cache
 from django.conf import settings
+from django.utils import timezone
 
 from storage.constants import STORAGE_LOG_ONLY
+from storage.usage import StorageUsage, limit_of
 from storage.vast.vast import get_vast_client
 
 logger = logging.getLogger(__name__)
@@ -117,19 +120,21 @@ def _user_storage(client_key, path, area_name, username) -> dict:
 
     # someone with no entry (who has never owned a file there) has the default limits and has used nothing
     limits = entry if entry is not None else default
-    soft, hard = limits.get("soft_limit"), limits.get("hard_limit")
-    is_default = (soft, hard) == (default.get("soft_limit"), default.get("hard_limit"))
-    return {
-        "username": username,
-        "area": area_name,
-        "path": path,
-        "scope": "user",
-        "quota_source": "default" if is_default else "override",
-        "soft_limit_bytes": soft,
-        "hard_limit_bytes": hard,
-        "used_bytes": entry.get("used_capacity") if entry is not None else 0,
-        "used_inodes": entry.get("used_inodes") if entry is not None else 0,
-        "state": entry.get("state") if entry is not None else None,
+    usage = StorageUsage(
+        limit_bytes=limit_of(limits.get("soft_limit"), limits.get("hard_limit")),
+        used_bytes=entry.get("used_capacity") if entry is not None else 0,
         # when VAST last recalculated user usage in this quota: how fresh used_bytes really is
-        "retrieved_at": quota.get("last_user_quotas_update"),
-    }
+        measured_at=iso_or_none(quota.get("last_user_quotas_update")),
+        # the limits are read live, in this call
+        limit_reported_at=timezone.now().isoformat(),
+    )
+    return {"username": username, "area": area_name, **usage.as_dict()}
+
+
+def iso_or_none(value):
+    """A time VAST gives ("...Z") in ISO 8601 with an offset, as the other storage answers give
+    theirs; None if it's missing or unreadable."""
+    try:
+        return datetime.fromisoformat(value).isoformat()
+    except (TypeError, ValueError):
+        return None

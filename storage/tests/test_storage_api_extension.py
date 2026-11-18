@@ -5,11 +5,13 @@ is tested in coldfront-rest-api-plugin; these call the extension directly.
 """
 
 import logging
+from datetime import datetime, timedelta
 
 import pytest
 from coldfront_utils.api_extensions import ExtensionNotFound, ExtensionUnavailable, find_extension
 from django.contrib.auth.models import Permission, User
 from django.core.cache import cache
+from django.utils import timezone
 from vast_api_client.exceptions import VastConnectionError
 
 from storage import user_storage
@@ -200,40 +202,62 @@ def test_no_areas_when_none_are_configured(settings, smith):
 
 
 def test_the_area_shape(vast, smith):
+    """The quota and usage fields every storage answer shares (storage.usage.StorageUsage), and
+    nothing of VAST's own: no path, limits by kind, inodes or VAST state."""
     vast.entries = [user_entry("smith01", used=12 * GB)]
+    before = timezone.now()
 
-    assert ask_area(smith) == {
+    body = ask_area(smith)
+
+    limit_reported_at = body.pop("limit_reported_at")
+    assert body == {
         "extension": "storage",
         "version": 1,
         "username": "smith01",
         "area": "home",
-        "path": "/homedir",
-        "scope": "user",
-        "quota_source": "default",
-        "soft_limit_bytes": 30 * GB,
-        "hard_limit_bytes": 30 * GB,
+        "limit_bytes": 30 * GB,
         "used_bytes": 12 * GB,
-        "used_inodes": 1234,
-        "state": "OK",
-        "retrieved_at": "2026-11-16T21:49:07.652033Z",
+        "state": "ok",
+        # when VAST last recalculated the area's user usage
+        "measured_at": "2026-11-16T21:49:07.652033+00:00",
     }
+    # when VAST was asked
+    assert before - timedelta(seconds=1) <= datetime.fromisoformat(limit_reported_at) <= timezone.now()
 
 
-def test_limits_that_differ_from_the_default_are_an_override(vast, smith):
-    vast.entries = [user_entry("smith01", soft=200 * GB, hard=None)]
+def test_the_areas_path_is_never_in_the_answer(vast, smith):
+    vast.entries = [user_entry("smith01")]
 
-    body = ask_area(smith)
+    assert "/homedir" not in str(ask_area(smith))
 
-    assert body["quota_source"] == "override"
-    assert (body["soft_limit_bytes"], body["hard_limit_bytes"]) == (200 * GB, None)
+
+@pytest.mark.parametrize(
+    "soft, hard, limit",
+    [(200 * GB, 300 * GB, 200 * GB), (200 * GB, None, 200 * GB), (None, 300 * GB, 300 * GB), (0, 0, None)],
+    ids=["soft", "soft-alone", "hard-without-soft", "zeros"],
+)
+def test_a_persons_own_limit_is_the_soft_one_else_the_hard_one(vast, smith, soft, hard, limit):
+    vast.entries = [user_entry("smith01", soft=soft, hard=hard)]
+
+    assert ask_area(smith)["limit_bytes"] == limit
+
+
+def test_over_the_limit_is_over_limit(vast, smith):
+    vast.entries = [user_entry("smith01", soft=30 * GB, used=30 * GB + 1)]
+
+    assert ask_area(smith)["state"] == "over_limit"
 
 
 def test_someone_with_no_entry_gets_the_default_and_nothing_used(vast, smith):
     body = ask_area(smith)
 
-    assert body["quota_source"] == "default"
-    assert (body["soft_limit_bytes"], body["hard_limit_bytes"]) == (30 * GB, 30 * GB)
-    assert (body["used_bytes"], body["used_inodes"], body["state"]) == (0, 0, None)
+    assert (body["limit_bytes"], body["used_bytes"], body["state"]) == (30 * GB, 0, "ok")
+
+
+def test_an_unreadable_recalculation_time_is_null(vast, smith):
+    vast.quotas["/homedir"]["last_user_quotas_update"] = None
+
+    assert ask_area(smith)["measured_at"] is None
 
 
 def test_each_area_is_its_own_quota(vast, smith):
@@ -241,12 +265,7 @@ def test_each_area_is_its_own_quota(vast, smith):
 
     body = ask_area(smith, "scratch")
 
-    assert (body["area"], body["path"], body["used_bytes"], body["quota_source"]) == (
-        "scratch",
-        "/scratch",
-        7 * GB,
-        "default",
-    )
+    assert (body["area"], body["used_bytes"], body["limit_bytes"]) == ("scratch", 7 * GB, 100 * GB)
 
 
 def test_someone_elses_area_is_looked_up_for_them_not_the_caller(vast, make_person, smith):

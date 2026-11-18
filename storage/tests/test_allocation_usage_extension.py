@@ -238,37 +238,6 @@ def test_the_answer_doesnt_say_where_it_came_from(vast, vast_allocation, truenas
     assert "source" not in ask(truenas_allocation)
 
 
-def test_storage_usage_is_one_limit_and_a_state():
-    usage = allocation_usage.StorageUsage(
-        limit_bytes=10,
-        used_bytes=4,
-        measured_at="m",
-        limit_reported_at="l",
-        stored_used_bytes=3,
-        stored_usage_reported_at="s",
-    )
-
-    assert usage.as_dict() == {
-        "limit_bytes": 10,
-        "used_bytes": 4,
-        "state": "ok",
-        "measured_at": "m",
-        "limit_reported_at": "l",
-        "stored_used_bytes": 3,
-        "stored_usage_reported_at": "s",
-    }
-
-
-@pytest.mark.parametrize(
-    "limit, used, state",
-    [(10, 4, "ok"), (10, 10, "ok"), (10, 11, "over_limit"), (None, 4, None), (10, None, None)],
-)
-def test_the_state_compares_usage_with_the_limit(limit, used, state):
-    usage = allocation_usage.StorageUsage(limit_bytes=limit, used_bytes=used)
-
-    assert usage.state == state
-
-
 # the Storage Path: the path people use, an attribute, with ColdFront's rule for private ones
 
 

@@ -10,7 +10,6 @@ coldfront-rest-api-plugin's docs/rest-api-plan.md.
 """
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +26,7 @@ from storage.constants import (
     USAGE_REPORT_DATE_ATTRIBUTE_NAME,
 )
 from storage.models import StorageHandler
+from storage.usage import StorageUsage, limit_of
 from storage.user_storage import StorageLookupsOff, StorageUnavailable, vast_client_for
 from storage.utils import get_client_config
 
@@ -34,50 +34,6 @@ logger = logging.getLogger(__name__)
 
 # VAST keeps a directory quota's usage current itself; this only spares it a dashboard refreshing
 ANSWER_SECONDS = 2 * 60
-
-
-@dataclass
-class StorageUsage:
-    """
-    What the usage extension reports, whatever the source: the same keys from VAST and from
-    ColdFront's stored values, null where a source has nothing.
-
-    limit_bytes is the one limit people are told: the soft limit if there is one, else the hard one
-    (see limit_of()). measured_at is when used_bytes was measured, limit_reported_at when the limit
-    was read. stored_used_bytes is ColdFront's own figure, the allocation's reported_usage_bytes from
-    the Starfish task, as on its allocation page; for stored answers it is used_bytes again.
-    """
-
-    limit_bytes: int | None = None
-    used_bytes: int | None = None
-    measured_at: str | None = None
-    limit_reported_at: str | None = None
-    stored_used_bytes: int | None = None
-    stored_usage_reported_at: str | None = None
-
-    @property
-    def state(self):
-        """ "ok", "over_limit", or None when there's no limit or no usage to compare."""
-        if self.limit_bytes is None or self.used_bytes is None:
-            return None
-        return "over_limit" if self.used_bytes > self.limit_bytes else "ok"
-
-    def as_dict(self) -> dict:
-        return {
-            "limit_bytes": self.limit_bytes,
-            "used_bytes": self.used_bytes,
-            "state": self.state,
-            "measured_at": self.measured_at,
-            "limit_reported_at": self.limit_reported_at,
-            "stored_used_bytes": self.stored_used_bytes,
-            "stored_usage_reported_at": self.stored_usage_reported_at,
-        }
-
-
-def limit_of(soft, hard):
-    """The soft limit if there is one, else the hard one; None if neither. 0 is no limit: VAST's batch
-    task and TrueNAS (ZFS) both record no quota as 0."""
-    return soft or hard or None
 
 
 class NoUsage(Exception):
@@ -114,13 +70,13 @@ def lookup_allocation_usage(allocation, caller) -> dict:
     }
     client_type = client_config.get("type")
     if client_type == "vast":
-        return {**answer, **_vast_usage(allocation, client_key, client_config).as_dict()}
+        return {**answer, **_vast_usage(allocation, client_key, client_config)}
     if client_type == "truenas":
-        return {**answer, **_stored_usage(allocation).as_dict()}
+        return {**answer, **_stored_usage(allocation)}
     raise StorageUnavailable(f"storage client {client_key!r} has type {client_type!r}, not vast or truenas")
 
 
-def _vast_usage(allocation, client_key, client_config) -> StorageUsage:
+def _vast_usage(allocation, client_key, client_config) -> dict:
     # here, not at the top: vast-api-client comes with the plugin's vast extra
     from vast_api_client.exceptions import VastError
 
@@ -140,16 +96,19 @@ def _vast_usage(allocation, client_key, client_config) -> StorageUsage:
         raise StorageUnavailable(f"VAST {client_key}: {error}") from error
     if quota is None:
         raise NoUsage("no quota at its path")
-    return StorageUsage(
+    usage = StorageUsage(
         limit_bytes=quota["limit_bytes"],
         used_bytes=quota["used_bytes"],
         # both live, read in the one call
         measured_at=quota["measured_at"],
         limit_reported_at=quota["measured_at"],
-        # what ColdFront shows: Starfish's once-a-day figure, which the live one doesn't replace
-        stored_used_bytes=stored_bytes(allocation, USAGE_IN_BYTES_ATTRIBUTE_NAME),
-        stored_usage_reported_at=stored_date(allocation, USAGE_REPORT_DATE_ATTRIBUTE_NAME),
     )
+    return {
+        **usage.as_dict(),
+        # what ColdFront shows: Starfish's once-a-day figure, which the live one doesn't replace
+        "stored_used_bytes": stored_bytes(allocation, USAGE_IN_BYTES_ATTRIBUTE_NAME),
+        "stored_usage_reported_at": stored_date(allocation, USAGE_REPORT_DATE_ATTRIBUTE_NAME),
+    }
 
 
 @ttl_cache(timeout=ANSWER_SECONDS)
@@ -174,19 +133,19 @@ def _directory_quota(client_key, path):
     }
 
 
-def _stored_usage(allocation) -> StorageUsage:
+def _stored_usage(allocation) -> dict:
     """ColdFront's stored values: the quota from the TrueNAS batch task, the usage from Starfish's."""
     used = stored_bytes(allocation, USAGE_IN_BYTES_ATTRIBUTE_NAME)
     usage_date = stored_date(allocation, USAGE_REPORT_DATE_ATTRIBUTE_NAME)
-    return StorageUsage(
+    usage = StorageUsage(
         # TrueNAS records one quota, which the batch task stores
         limit_bytes=limit_of(None, stored_bytes(allocation, QUOTA_IN_BYTES_ATTRIBUTE_NAME)),
         used_bytes=used,
         measured_at=usage_date,
         limit_reported_at=stored_date(allocation, QUOTA_REPORT_DATE_ATTRIBUTE_NAME),
-        stored_used_bytes=used,
-        stored_usage_reported_at=usage_date,
     )
+    # ColdFront's own figure, here the same as used_bytes
+    return {**usage.as_dict(), "stored_used_bytes": used, "stored_usage_reported_at": usage_date}
 
 
 def visible_storage_path(allocation, caller):
