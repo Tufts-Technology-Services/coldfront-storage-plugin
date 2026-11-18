@@ -204,8 +204,10 @@ the API installed, the extension isn't served.
 - `GET /api/v2/users/<username>/storage/`: the areas, by key (`{"key": "home"}`), in settings order.
   Asks no storage system.
 - `GET /api/v2/users/<username>/storage/<area>/`: the person's user quota and usage in that area,
-  from VAST: soft and hard limits, whether they're the area's default or an override, `used_bytes`,
-  and when VAST last recalculated usage (every minute or two). Answers are cached for two minutes.
+  from VAST, with the same usage fields as an allocation's (`storage/usage.py`, below):
+  `limit_bytes`, `used_bytes`, `state`, `measured_at` (when VAST last recalculated usage, every
+  minute or two) and `limit_reported_at` (when VAST was asked), beside `username` and `area`. No
+  paths. Answers are cached for two minutes.
 
 The areas are a setting, mapping each area's key to its `STORAGE_PLUGIN_CLIENTS` entry and the path
 of its directory quota there:
@@ -256,7 +258,9 @@ Every answer has the same keys, whatever the source, with null where a source ha
   without VAST's words, which are logged.
 - **`truenas`: stored.** ColdFront's own values, asking nothing: the quota the
   TrueNAS batch task stored and the usage Starfish's stored, with their report dates.
-- **`limit_bytes`** is the soft limit if there is one, else the hard limit; a limit of 0 is no limit.
+- **`limit_bytes`, `used_bytes`, `state`, `measured_at`, `limit_reported_at`** are the fields every
+  storage answer shares, home and scratch included (`storage/usage.py`, `StorageUsage`).
+  **`limit_bytes`** is the soft limit if there is one, else the hard limit; a limit of 0 is no limit.
   **`state`** is `ok`, `over_limit` (usage above `limit_bytes`) or null.
 - **`stored_used_bytes`** is the figure ColdFront shows, `reported_usage_bytes` from the Starfish
   task (up to a day old). For a VAST allocation it differs from the live `used_bytes`; ColdFront
